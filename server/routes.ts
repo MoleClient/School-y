@@ -53,7 +53,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   const proxyRateLimit = new Map<string, number[]>();
   const RATE_LIMIT_WINDOW = 60000;
-  const MAX_REQUESTS_PER_WINDOW = 60;
+  const MAX_REQUESTS_PER_WINDOW = 300; // Increased for resource-intensive SPAs
 
   const userAgents = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -310,22 +310,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch(e) { return false; }
     }
     
-    // XHR proxy - route through /api/xp
+    // Check if URL is for media content (use streaming endpoint)
+    function isMediaUrl(url) {
+      if (!url) return false;
+      var lower = url.toLowerCase();
+      var mediaExts = ['.mp4','.webm','.mp3','.wav','.ogg','.m3u8','.ts','.m4a','.flac','.mkv','.avi','.mov'];
+      for (var i = 0; i < mediaExts.length; i++) {
+        if (lower.includes(mediaExts[i])) return true;
+      }
+      return false;
+    }
+    
+    // XHR proxy - route through /api/xp (or /api/stream for media)
     var origOpen = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function(method, url, async, user, pass) {
       var absUrl = makeAbs(url);
-      var proxyUrl = '/api/xp?u=' + encodeURIComponent(absUrl);
+      var endpoint = isMediaUrl(absUrl) ? '/api/stream' : '/api/xp';
+      var proxyUrl = endpoint + '?u=' + encodeURIComponent(absUrl);
       return origOpen.call(this, method, proxyUrl, async !== false, user, pass);
     };
     
-    // Fetch proxy - route through /api/xp  
+    // Fetch proxy - route through /api/xp (or /api/stream for media)
     var origFetch = window.fetch;
     window.fetch = function(input, init) {
       try {
         var url = typeof input === 'string' ? input : (input && input.url ? input.url : null);
         if (url && !url.startsWith('/api/') && !url.startsWith('data:') && !url.startsWith('blob:')) {
           var absUrl = makeAbs(url);
-          var proxyUrl = '/api/xp?u=' + encodeURIComponent(absUrl);
+          var endpoint = isMediaUrl(absUrl) ? '/api/stream' : '/api/xp';
+          var proxyUrl = endpoint + '?u=' + encodeURIComponent(absUrl);
           var newInit = init ? Object.assign({}, init) : {};
           // Preserve method and body from Request objects
           if (input && typeof input === 'object' && input.method) {
@@ -467,22 +480,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       );
 
-      // Rewrite resource URLs
+      // Helper to check if URL is media content
+      const isMediaUrl = (url: string): boolean => {
+        const lower = url.toLowerCase();
+        const mediaExts = ['.mp4', '.webm', '.mp3', '.wav', '.ogg', '.m3u8', '.ts', '.m4a', '.flac', '.mkv', '.avi', '.mov'];
+        return mediaExts.some(ext => lower.includes(ext));
+      };
+      
+      // Rewrite resource URLs - route media through streaming endpoint
       modifiedHtml = modifiedHtml.replace(
         /(<(?:img|script|link|source|video|audio|iframe)\s+[^>]*(?:src|href)=["'])([^"']+)(["'])/gi,
         (match, prefix, url, suffix) => {
           if (url.startsWith('data:') || url.startsWith('javascript:')) {
             return match;
           }
-          // For resources, use direct URL with base (not proxy) to avoid breaking things
+          
+          // Make URL absolute
+          let absoluteUrl = url;
           if (url.startsWith('//')) {
-            return prefix + parsedUrl.protocol + url + suffix;
+            absoluteUrl = parsedUrl.protocol + url;
           } else if (url.startsWith('/')) {
-            return prefix + baseUrl + url + suffix;
+            absoluteUrl = baseUrl + url;
           } else if (!url.startsWith('http')) {
-            return prefix + baseUrl + '/' + url + suffix;
+            absoluteUrl = baseUrl + '/' + url;
           }
-          return match;
+          
+          // Route video/audio sources through streaming endpoint
+          if (isMediaUrl(absoluteUrl) || prefix.toLowerCase().includes('video') || prefix.toLowerCase().includes('audio') || prefix.toLowerCase().includes('source')) {
+            return prefix + '/api/stream?u=' + encodeURIComponent(absoluteUrl) + suffix;
+          }
+          
+          // Other resources use direct URL with base
+          return prefix + absoluteUrl + suffix;
         }
       );
 
@@ -507,7 +536,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Universal fetch proxy - forwards any request through our server
+  // Universal fetch proxy - forwards any request through our server with STREAMING
   app.all("/api/xp", async (req, res) => {
     try {
       const targetUrl = req.query.u as string;
@@ -542,11 +571,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ error: "Not allowed" });
       }
 
-      // Forward the request with minimal headers
+      // Forward the request with full headers for better compatibility
       const headers: Record<string, string> = {
-        'User-Agent': userAgents[0],
+        'User-Agent': userAgents[Math.floor(Math.random() * userAgents.length)],
         'Accept': req.headers.accept as string || '*/*',
         'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'identity', // Request uncompressed for streaming
       };
 
       // Forward content-type for POST/PUT/PATCH
@@ -565,35 +595,153 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      // Use a longer timeout for streaming - don't abort active transfers
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        // Only abort if we haven't started receiving data
+        if (!res.headersSent) controller.abort();
+      }, 30000);
+      
       const response = await fetch(targetUrl, {
         method: req.method,
         headers,
         body,
         redirect: 'follow',
-        signal: AbortSignal.timeout(15000),
+        signal: controller.signal,
       });
+      
+      clearTimeout(timeoutId); // Cancel timeout once we have a response
 
       // Forward response headers (filtered)
-      const safeHeaders = ['content-type', 'content-length', 'cache-control', 'etag', 'last-modified'];
+      const safeHeaders = ['content-type', 'cache-control', 'etag', 'last-modified'];
       for (const header of safeHeaders) {
         const value = response.headers.get(header);
         if (value) res.setHeader(header, value);
       }
       
       res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
       res.status(response.status);
 
-      const contentType = response.headers.get('content-type') || '';
-      if (contentType.includes('text') || contentType.includes('json') || contentType.includes('xml')) {
-        const text = await response.text();
-        res.send(text);
+      // STREAM the response body directly for faster delivery
+      if (response.body) {
+        const reader = response.body.getReader();
+        const pump = async (): Promise<void> => {
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              if (!res.writableEnded) {
+                res.write(Buffer.from(value));
+              }
+            }
+            if (!res.writableEnded) res.end();
+          } catch (err) {
+            if (!res.writableEnded) res.end();
+          }
+        };
+        await pump();
       } else {
+        // Fallback for responses without streaming body
         const buffer = await response.arrayBuffer();
         res.send(Buffer.from(buffer));
       }
     } catch (error: any) {
       console.error("XP proxy error:", error.message);
-      res.status(500).json({ error: "Proxy error" });
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Proxy error" });
+      }
+    }
+  });
+  
+  // Dedicated streaming media proxy for images, videos, and large files
+  app.get("/api/stream", async (req, res) => {
+    try {
+      const targetUrl = req.query.u as string;
+      if (!targetUrl) {
+        return res.status(400).send("Missing URL");
+      }
+
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(targetUrl);
+      } catch (e) {
+        return res.status(400).send("Invalid URL");
+      }
+
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        return res.status(400).send("Invalid protocol");
+      }
+
+      if (isPrivateOrLocalAddress(parsedUrl.hostname)) {
+        return res.status(403).send("Not allowed");
+      }
+
+      // Support range requests for video seeking
+      const rangeHeader = req.headers.range;
+      const headers: Record<string, string> = {
+        'User-Agent': userAgents[Math.floor(Math.random() * userAgents.length)],
+        'Accept': '*/*',
+      };
+      
+      if (rangeHeader) {
+        headers['Range'] = rangeHeader;
+      }
+
+      // No hard timeout for media - let it stream until complete
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        // Only abort if we haven't started receiving data
+        if (!res.headersSent) controller.abort();
+      }, 30000);
+      
+      const response = await fetch(targetUrl, {
+        method: 'GET',
+        headers,
+        redirect: 'follow',
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId); // Cancel timeout once we have a response
+
+      // Forward important headers for media playback
+      const mediaHeaders = ['content-type', 'content-length', 'content-range', 'accept-ranges'];
+      for (const header of mediaHeaders) {
+        const value = response.headers.get(header);
+        if (value) res.setHeader(header, value);
+      }
+      
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length');
+      res.status(response.status);
+
+      // Stream media content
+      if (response.body) {
+        const reader = response.body.getReader();
+        const pump = async (): Promise<void> => {
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              if (!res.writableEnded) {
+                res.write(Buffer.from(value));
+              }
+            }
+            if (!res.writableEnded) res.end();
+          } catch (err) {
+            if (!res.writableEnded) res.end();
+          }
+        };
+        await pump();
+      } else {
+        const buffer = await response.arrayBuffer();
+        res.send(Buffer.from(buffer));
+      }
+    } catch (error: any) {
+      console.error("Stream proxy error:", error.message);
+      if (!res.headersSent) {
+        res.status(500).send("Stream error");
+      }
     }
   });
 
