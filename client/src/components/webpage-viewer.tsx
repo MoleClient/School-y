@@ -126,7 +126,8 @@ export function WebpageViewer({ url }: WebpageViewerProps) {
         title="Webpage viewer"
         onLoad={handleLoad}
         onError={handleError}
-        sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-top-navigation allow-modals"
+        sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-top-navigation allow-modals allow-pointer-lock allow-presentation allow-downloads"
+        allow="accelerometer; camera; encrypted-media; fullscreen; geolocation; gyroscope; microphone; midi; payment; picture-in-picture; clipboard-write"
         referrerPolicy="no-referrer"
         data-testid="iframe-webpage"
       />

@@ -262,24 +262,123 @@ export async function registerRoutes(app: Express): Promise<Server> {
 (function() {
   try {
     var B="${baseUrl}";
+    var P="${parsedUrl.protocol}";
+    
+    // Bypass frame detection
     Object.defineProperty(window, 'top', { get: function() { return window.self; }, configurable: false });
     Object.defineProperty(window, 'parent', { get: function() { return window.self; }, configurable: false });
     Object.defineProperty(window, 'frameElement', { get: function() { return null; }, configurable: false });
     Object.defineProperty(document, 'referrer', { get: function() { return ''; }, configurable: false });
-    window.addEventListener('beforeunload', function(e) { e.stopImmediatePropagation(); return undefined; }, true);
+    
+    // URL encoding for proxy (matches server-side encoding)
+    function encodeForProxy(url) {
+      try {
+        if (!url || url.startsWith('data:') || url.startsWith('javascript:') || url.startsWith('#') || url.startsWith('blob:') || url.startsWith('mailto:') || url.startsWith('tel:')) return url;
+        if (url.startsWith('/api/p')) return url;
+        var abs = url;
+        if (url.startsWith('//')) abs = P + url;
+        else if (url.startsWith('/')) abs = B + url;
+        else if (!url.startsWith('http')) abs = B + '/' + url;
+        var rev = abs.split('').reverse().join('');
+        var enc = btoa(rev).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=/g,'');
+        return '/api/p?q=' + enc;
+      } catch(e) { return url; }
+    }
+    
+    // Helper to make URL absolute
+    function makeAbs(url) {
+      if (!url || url.startsWith('data:') || url.startsWith('blob:') || url.startsWith('javascript:')) return url;
+      if (url.startsWith('//')) return P + url;
+      if (url.startsWith('/')) return B + url;
+      if (!url.startsWith('http')) return B + '/' + url;
+      return url;
+    }
+    
+    // XHR proxy - route through /api/xp
     var origOpen = XMLHttpRequest.prototype.open;
-    XMLHttpRequest.prototype.open = function() {
-      var u = arguments[1] || '';
-      if (u.startsWith('/')) u = B + u;
-      arguments[1] = u;
-      return origOpen.apply(this, arguments);
+    var origSend = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.open = function(method, url, async, user, pass) {
+      this._proxyMethod = method;
+      this._proxyUrl = makeAbs(url);
+      // Store original async value, default to true
+      this._proxyAsync = async !== false;
+      var proxyUrl = '/api/xp?u=' + encodeURIComponent(this._proxyUrl);
+      return origOpen.call(this, method, proxyUrl, this._proxyAsync, user, pass);
     };
+    
+    // Fetch proxy - route through /api/xp
     var origFetch = window.fetch;
-    window.fetch = function(u, o) {
-      if (typeof u === 'string' && u.startsWith('/')) u = B + u;
-      return origFetch.call(this, u, o);
+    window.fetch = function(input, init) {
+      try {
+        var url = typeof input === 'string' ? input : (input && input.url ? input.url : null);
+        if (url && !url.startsWith('/api/') && !url.startsWith('data:') && !url.startsWith('blob:')) {
+          var absUrl = makeAbs(url);
+          var proxyUrl = '/api/xp?u=' + encodeURIComponent(absUrl);
+          return origFetch.call(this, proxyUrl, init || {});
+        }
+      } catch(e) { console.error('Fetch proxy error:', e); }
+      return origFetch.apply(this, arguments);
     };
-  } catch(e) {}
+    
+    // Intercept form submissions
+    document.addEventListener('submit', function(e) {
+      var form = e.target;
+      if (!form || form.tagName !== 'FORM') return;
+      var action = form.getAttribute('action') || '';
+      if (action.startsWith('/api/p')) return;
+      
+      e.preventDefault();
+      e.stopPropagation();
+      
+      // Build the full target URL with form params for GET
+      var targetUrl = action;
+      if (action.startsWith('//')) targetUrl = P + action;
+      else if (action.startsWith('/')) targetUrl = B + action;
+      else if (!action.startsWith('http')) targetUrl = B + '/' + action;
+      
+      if ((form.method || 'get').toLowerCase() === 'get') {
+        // For GET: append form data to URL, then encode the whole thing
+        var fd = new FormData(form);
+        var params = new URLSearchParams(fd).toString();
+        var fullUrl = targetUrl + (targetUrl.includes('?') ? '&' : '?') + params;
+        window.location.href = encodeForProxy(fullUrl);
+      } else {
+        // For POST: submit to our POST proxy endpoint
+        var newForm = document.createElement('form');
+        newForm.method = 'POST';
+        newForm.action = '/api/pf';
+        var urlInput = document.createElement('input');
+        urlInput.type = 'hidden';
+        urlInput.name = '_target_url';
+        urlInput.value = targetUrl;
+        newForm.appendChild(urlInput);
+        var fd = new FormData(form);
+        for (var pair of fd.entries()) {
+          var inp = document.createElement('input');
+          inp.type = 'hidden';
+          inp.name = pair[0];
+          inp.value = pair[1];
+          newForm.appendChild(inp);
+        }
+        document.body.appendChild(newForm);
+        newForm.submit();
+      }
+    }, true);
+    
+    // Handle link clicks - guard against non-Element targets
+    document.addEventListener('click', function(e) {
+      var target = e.target;
+      if (!target || typeof target.closest !== 'function') return;
+      var link = target.closest('a[href]');
+      if (!link) return;
+      var href = link.getAttribute('href');
+      if (!href || href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('/api/p')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      window.location.href = encodeForProxy(href);
+    }, true);
+    
+  } catch(e) { console.error('Proxy script error:', e); }
 })();
 </script>`;
 
@@ -359,6 +458,216 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.send(modifiedHtml);
     } catch (error) {
       console.error("Proxy error:", error);
+      res.status(500).send("Error");
+    }
+  });
+
+  // Universal fetch proxy - forwards any request through our server
+  app.all("/api/xp", async (req, res) => {
+    try {
+      const targetUrl = req.query.u as string;
+      if (!targetUrl) {
+        return res.status(400).json({ error: "Missing URL" });
+      }
+
+      const clientIp = req.ip || 'unknown';
+      const now = Date.now();
+      const requests = proxyRateLimit.get(clientIp) || [];
+      const recentRequests = requests.filter(time => now - time < RATE_LIMIT_WINDOW);
+      
+      if (recentRequests.length >= MAX_REQUESTS_PER_WINDOW) {
+        return res.status(429).json({ error: "Rate limit exceeded" });
+      }
+      
+      recentRequests.push(now);
+      proxyRateLimit.set(clientIp, recentRequests);
+
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(targetUrl);
+      } catch (e) {
+        return res.status(400).json({ error: "Invalid URL" });
+      }
+
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        return res.status(400).json({ error: "Invalid protocol" });
+      }
+
+      if (isPrivateOrLocalAddress(parsedUrl.hostname)) {
+        return res.status(403).json({ error: "Not allowed" });
+      }
+
+      // Forward the request with minimal headers
+      const headers: Record<string, string> = {
+        'User-Agent': userAgents[0],
+        'Accept': req.headers.accept as string || '*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
+      };
+
+      // Forward content-type for POST/PUT/PATCH
+      if (['POST', 'PUT', 'PATCH'].includes(req.method) && req.headers['content-type']) {
+        headers['Content-Type'] = req.headers['content-type'] as string;
+      }
+
+      let body: string | Buffer | undefined;
+      if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
+        const rawBody = (req as any).rawBody as Buffer | undefined;
+        if (rawBody) {
+          body = rawBody;
+        } else if (typeof req.body === 'object') {
+          body = JSON.stringify(req.body);
+          headers['Content-Type'] = 'application/json';
+        }
+      }
+
+      const response = await fetch(targetUrl, {
+        method: req.method,
+        headers,
+        body,
+        redirect: 'follow',
+        signal: AbortSignal.timeout(15000),
+      });
+
+      // Forward response headers (filtered)
+      const safeHeaders = ['content-type', 'content-length', 'cache-control', 'etag', 'last-modified'];
+      for (const header of safeHeaders) {
+        const value = response.headers.get(header);
+        if (value) res.setHeader(header, value);
+      }
+      
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.status(response.status);
+
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('text') || contentType.includes('json') || contentType.includes('xml')) {
+        const text = await response.text();
+        res.send(text);
+      } else {
+        const buffer = await response.arrayBuffer();
+        res.send(Buffer.from(buffer));
+      }
+    } catch (error: any) {
+      console.error("XP proxy error:", error.message);
+      res.status(500).json({ error: "Proxy error" });
+    }
+  });
+
+  // POST form proxy endpoint
+  app.post("/api/pf", async (req, res) => {
+    try {
+      const targetUrl = req.body._target_url as string;
+      if (!targetUrl) {
+        return res.status(400).send("Missing target URL");
+      }
+      
+      const clientIp = req.ip || 'unknown';
+      const now = Date.now();
+      const requests = proxyRateLimit.get(clientIp) || [];
+      const recentRequests = requests.filter(time => now - time < RATE_LIMIT_WINDOW);
+      
+      if (recentRequests.length >= MAX_REQUESTS_PER_WINDOW) {
+        return res.status(429).send("Rate limit exceeded");
+      }
+      
+      recentRequests.push(now);
+      proxyRateLimit.set(clientIp, recentRequests);
+
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(targetUrl);
+      } catch (e) {
+        return res.status(400).send("Invalid URL");
+      }
+
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        return res.status(400).send("Invalid protocol");
+      }
+
+      if (isPrivateOrLocalAddress(parsedUrl.hostname)) {
+        return res.status(403).send("Not allowed");
+      }
+
+      // Build form data from request body (excluding _target_url)
+      const formData = new URLSearchParams();
+      for (const [key, value] of Object.entries(req.body)) {
+        if (key !== '_target_url') {
+          formData.append(key, String(value));
+        }
+      }
+
+      const ua = userAgents[0];
+      const response = await fetch(targetUrl, {
+        method: 'POST',
+        headers: {
+          'User-Agent': ua,
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Cache-Control': 'no-cache',
+        },
+        body: formData.toString(),
+        redirect: 'follow',
+        signal: AbortSignal.timeout(20000),
+      });
+
+      if (!response.ok) {
+        return res.status(response.status).send("Request failed");
+      }
+
+      let html = await response.text();
+      
+      const domain = parsedUrl.hostname;
+      const baseUrl = `${parsedUrl.protocol}//${parsedUrl.host}`;
+
+      // Inject the same frame bypass script
+      const frameBypassScript = `
+<script>
+(function() {
+  try {
+    var B="${baseUrl}";
+    var P="${parsedUrl.protocol}";
+    Object.defineProperty(window, 'top', { get: function() { return window.self; }, configurable: false });
+    Object.defineProperty(window, 'parent', { get: function() { return window.self; }, configurable: false });
+    Object.defineProperty(window, 'frameElement', { get: function() { return null; }, configurable: false });
+    function encodeForProxy(url) {
+      try {
+        if (!url || url.startsWith('data:') || url.startsWith('javascript:') || url.startsWith('#') || url.startsWith('/api/p')) return url;
+        var abs = url;
+        if (url.startsWith('//')) abs = P + url;
+        else if (url.startsWith('/')) abs = B + url;
+        else if (!url.startsWith('http')) abs = B + '/' + url;
+        var rev = abs.split('').reverse().join('');
+        var enc = btoa(rev).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=/g,'');
+        return '/api/p?q=' + enc;
+      } catch(e) { return url; }
+    }
+    document.addEventListener('click', function(e) {
+      var target = e.target;
+      if (!target || typeof target.closest !== 'function') return;
+      var link = target.closest('a[href]');
+      if (!link) return;
+      var href = link.getAttribute('href');
+      if (!href || href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('/api/p')) return;
+      e.preventDefault();
+      window.location.href = encodeForProxy(href);
+    }, true);
+  } catch(e) {}
+})();
+</script>`;
+
+      // Inject script
+      if (html.includes('<head')) {
+        html = html.replace(/<head([^>]*)>/i, `<head$1>${frameBypassScript}`);
+      } else {
+        html = `<!DOCTYPE html><html><head>${frameBypassScript}</head><body>${html}</body></html>`;
+      }
+
+      res.removeHeader('X-Frame-Options');
+      res.removeHeader('Content-Security-Policy');
+      res.setHeader('Content-Type', 'text/html');
+      res.send(html);
+    } catch (error) {
+      console.error("POST proxy error:", error);
       res.status(500).send("Error");
     }
   });

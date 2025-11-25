@@ -119,10 +119,13 @@ export function BrowserChrome({
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Search or enter website URL"
+              placeholder="Enter URL (e.g., google.com, reddit.com)"
               className="pl-10 pr-4 h-9 bg-background/60 border-border/50 rounded-lg font-mono text-sm focus-visible:ring-2 focus-visible:ring-primary/20"
               data-testid="input-address-bar"
             />
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground/60 pointer-events-none hidden sm:block">
+              Press Enter to go
+            </span>
           </div>
         </form>
       </div>
