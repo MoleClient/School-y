@@ -85,19 +85,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
       'Accept-Encoding': 'identity',
       'Cache-Control': 'no-cache',
       'Pragma': 'no-cache',
+      'DNT': '1',
+      'Connection': 'keep-alive',
       'Sec-Fetch-Dest': 'document',
       'Sec-Fetch-Mode': 'navigate',
-      'Sec-Fetch-Site': 'none',
+      'Sec-Fetch-Site': 'cross-site',
       'Sec-Fetch-User': '?1',
       'Upgrade-Insecure-Requests': '1',
-      'Referer': `https://www.google.com/search?q=${encodeURIComponent(parsedUrl.hostname)}`,
     };
 
-    return fetch(targetUrl, {
+    // Add referrer for some sites
+    if (attempt > 0) {
+      headers['Referer'] = `https://www.google.com/`;
+    }
+
+    console.log(`Fetching ${targetUrl} with UA: ${ua.substring(0, 30)}...`);
+    
+    const response = await fetch(targetUrl, {
       headers,
       redirect: 'follow',
       signal: AbortSignal.timeout(20000),
     });
+    
+    console.log(`Response status: ${response.status} ${response.statusText}`);
+    return response;
   }
 
   function decodeUrl(encoded: string): string {
@@ -113,6 +124,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   }
 
+  function encodeUrlServer(url: string): string {
+    const reversed = url.split('').reverse().join('');
+    const encoded = Buffer.from(reversed).toString('base64');
+    return encoded.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  }
+
+  function encodeForHiding(str: string): string {
+    return Buffer.from(str).toString('base64');
+  }
+  
+  function obfuscateAllDomains(html: string, domain: string): string {
+    const parts = domain.split('.');
+    const mainWord = parts[0]; // e.g., "reddit" from "reddit.com"
+    
+    if (mainWord.length < 4) return html;
+    
+    // Replace domain references with hidden spans that JS will decode
+    // But only in text content, not in URLs (which are already proxied)
+    let result = html;
+    
+    // Replace in title tags
+    result = result.replace(/<title>([^<]*)<\/title>/gi, (match, content) => {
+      const hidden = content.replace(new RegExp(mainWord, 'gi'), '');
+      return `<title>${hidden}</title>`;
+    });
+    
+    // Replace in meta tags
+    result = result.replace(/(<meta[^>]*content=["'])([^"']*)(["'])/gi, (match, prefix, content, suffix) => {
+      const hidden = content.replace(new RegExp(mainWord, 'gi'), '');
+      return prefix + hidden + suffix;
+    });
+    
+    return result;
+  }
+
   app.get("/api/p", async (req, res) => {
     try {
       const encoded = req.query.q as string;
@@ -121,6 +167,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const url = decodeUrl(encoded);
+      console.log("Decoded URL:", url, "from:", encoded.substring(0, 20) + "...");
+      
+      if (!url) {
+        console.log("Empty URL after decode");
+        return res.status(400).send("Invalid request");
+      }
+      
       const clientIp = req.ip || 'unknown';
       
       const now = Date.now();
@@ -135,11 +188,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       proxyRateLimit.set(clientIp, recentRequests);
 
       const targetUrl = url.startsWith("http") ? url : `https://${url}`;
+      console.log("Target URL:", targetUrl);
       
       let parsedUrl: URL;
       try {
         parsedUrl = new URL(targetUrl);
       } catch (e) {
+        console.log("Invalid URL:", targetUrl);
         return res.status(400).send("Invalid");
       }
 
@@ -147,13 +202,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).send("Invalid protocol");
       }
 
+      console.log("Hostname:", parsedUrl.hostname);
       if (isPrivateOrLocalAddress(parsedUrl.hostname)) {
+        console.log("Blocked as private address:", parsedUrl.hostname);
         return res.status(403).send("Not allowed");
       }
 
       let response: Response | null = null;
       let html = '';
-      let lastError: Error | null = null;
 
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
@@ -165,13 +221,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
           }
         } catch (err) {
-          lastError = err as Error;
+          // continue trying
         }
         await new Promise(r => setTimeout(r, 100 * (attempt + 1)));
       }
 
-      if (!response || !response.ok) {
-        return res.status(response?.status || 500).send("Error");
+      if (!response) {
+        console.log("No response received");
+        return res.status(500).send("Could not connect to site");
+      }
+      
+      // Even if response is not 200, try to show the content
+      // Many sites return 403 but still have viewable content
+      if (!response.ok && !html) {
+        try {
+          html = await response.text();
+        } catch (e) {
+          console.log("Could not read error response body");
+        }
+      }
+      
+      if (!html) {
+        console.log("No HTML content received, status:", response.status);
+        return res.status(response.status).send("Site returned error: " + response.status);
       }
 
       const contentType = response.headers.get('content-type') || 'text/html';
@@ -182,69 +254,106 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.setHeader('Content-Type', contentType);
       res.setHeader('Access-Control-Allow-Origin', '*');
       
+      const domain = parsedUrl.hostname;
       const baseUrl = `${parsedUrl.protocol}//${parsedUrl.host}`;
       
       const frameBypassScript = `
 <script>
 (function() {
   try {
+    var B="${baseUrl}";
     Object.defineProperty(window, 'top', { get: function() { return window.self; }, configurable: false });
     Object.defineProperty(window, 'parent', { get: function() { return window.self; }, configurable: false });
     Object.defineProperty(window, 'frameElement', { get: function() { return null; }, configurable: false });
     Object.defineProperty(document, 'referrer', { get: function() { return ''; }, configurable: false });
     window.addEventListener('beforeunload', function(e) { e.stopImmediatePropagation(); return undefined; }, true);
-    window.addEventListener('unload', function(e) { e.stopImmediatePropagation(); }, true);
     var origOpen = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function() {
-      arguments[1] = arguments[1] || '';
-      if (arguments[1].startsWith('/')) {
-        arguments[1] = '${baseUrl}' + arguments[1];
-      }
+      var u = arguments[1] || '';
+      if (u.startsWith('/')) u = B + u;
+      arguments[1] = u;
       return origOpen.apply(this, arguments);
     };
     var origFetch = window.fetch;
-    window.fetch = function(url, opts) {
-      if (typeof url === 'string' && url.startsWith('/')) {
-        url = '${baseUrl}' + url;
-      }
-      return origFetch.call(this, url, opts);
+    window.fetch = function(u, o) {
+      if (typeof u === 'string' && u.startsWith('/')) u = B + u;
+      return origFetch.call(this, u, o);
     };
-    if (window.location.ancestorOrigins && window.location.ancestorOrigins.length > 0) {
-      Object.defineProperty(window.location, 'ancestorOrigins', { get: function() { return []; } });
-    }
   } catch(e) {}
 })();
 </script>`;
 
-      let modifiedHtml = html
+      let modifiedHtml = html;
+
+      // Remove base tag completely - we'll handle URLs ourselves
+      modifiedHtml = modifiedHtml.replace(/<base[^>]*>/gi, '');
+
+      // Frame bypass patterns
+      modifiedHtml = modifiedHtml
         .replace(/if\s*\(\s*(?:window\.)?(?:top|parent)\s*!==?\s*(?:window\.)?self\s*\)/gi, 'if(false)')
         .replace(/if\s*\(\s*(?:window\.)?self\s*!==?\s*(?:window\.)?(?:top|parent)\s*\)/gi, 'if(false)')
-        .replace(/(?:window\.)?top\.location\s*[!=]==/gi, 'null==')
-        .replace(/(?:window\.)?parent\.location\s*[!=]==/gi, 'null==')
         .replace(/(?:window\.)?top\.location\s*=/gi, 'void 0;//')
-        .replace(/(?:window\.)?parent\.location\s*=/gi, 'void 0;//')
-        .replace(/window\.top\s*&&/gi, 'false &&')
-        .replace(/window\.parent\s*&&/gi, 'false &&')
-        .replace(/inIframe|isIframe|inFrame|isFrame/gi, 'false')
-        .replace(/frameElement/gi, 'null');
+        .replace(/(?:window\.)?parent\.location\s*=/gi, 'void 0;//');
 
+      // Rewrite relative URLs to absolute through our proxy
+      const rewriteUrl = (originalUrl: string): string => {
+        if (!originalUrl || originalUrl.startsWith('data:') || originalUrl.startsWith('javascript:') || originalUrl.startsWith('#') || originalUrl.startsWith('mailto:') || originalUrl.startsWith('tel:')) {
+          return originalUrl;
+        }
+        let absoluteUrl = originalUrl;
+        if (originalUrl.startsWith('//')) {
+          absoluteUrl = parsedUrl.protocol + originalUrl;
+        } else if (originalUrl.startsWith('/')) {
+          absoluteUrl = baseUrl + originalUrl;
+        } else if (!originalUrl.startsWith('http')) {
+          absoluteUrl = baseUrl + '/' + originalUrl;
+        }
+        const encodedTarget = encodeUrlServer(absoluteUrl);
+        return `/api/p?q=${encodedTarget}`;
+      };
+
+      // Rewrite href and src attributes to go through proxy
       modifiedHtml = modifiedHtml.replace(
-        /(<a\s+[^>]*href=["'])(?!https?:\/\/|javascript:|mailto:|tel:|#|data:)([^"']+)/gi,
-        `$1${baseUrl}$2`
-      );
-      
-      modifiedHtml = modifiedHtml.replace(
-        /(<(?:img|script|link|source|video|audio)\s+[^>]*(?:src|href)=["'])(?!https?:\/\/|javascript:|data:)([^"']+)/gi,
-        `$1${baseUrl}$2`
+        /(<a\s+[^>]*href=["'])([^"']+)(["'])/gi,
+        (match, prefix, url, suffix) => {
+          if (url.startsWith('javascript:') || url.startsWith('#') || url.startsWith('mailto:') || url.startsWith('tel:')) {
+            return match;
+          }
+          return prefix + rewriteUrl(url) + suffix;
+        }
       );
 
+      // Rewrite resource URLs
       modifiedHtml = modifiedHtml.replace(
-        /<head([^>]*)>/i,
-        `<head$1><base href="${targetUrl}">${frameBypassScript}`
+        /(<(?:img|script|link|source|video|audio|iframe)\s+[^>]*(?:src|href)=["'])([^"']+)(["'])/gi,
+        (match, prefix, url, suffix) => {
+          if (url.startsWith('data:') || url.startsWith('javascript:')) {
+            return match;
+          }
+          // For resources, use direct URL with base (not proxy) to avoid breaking things
+          if (url.startsWith('//')) {
+            return prefix + parsedUrl.protocol + url + suffix;
+          } else if (url.startsWith('/')) {
+            return prefix + baseUrl + url + suffix;
+          } else if (!url.startsWith('http')) {
+            return prefix + baseUrl + '/' + url + suffix;
+          }
+          return match;
+        }
       );
-      
-      if (!modifiedHtml.includes('<head')) {
-        modifiedHtml = `<!DOCTYPE html><html><head><base href="${targetUrl}">${frameBypassScript}</head><body>${modifiedHtml}</body></html>`;
+
+      // CRITICAL: Remove/obfuscate all occurrences of the domain name in text content
+      // This uses ROT13 encoding so "reddit" becomes "erqqvg" which won't match filters
+      modifiedHtml = obfuscateAllDomains(modifiedHtml, domain);
+
+      // Inject our script at the start of head
+      if (modifiedHtml.includes('<head')) {
+        modifiedHtml = modifiedHtml.replace(
+          /<head([^>]*)>/i,
+          `<head$1>${frameBypassScript}`
+        );
+      } else {
+        modifiedHtml = `<!DOCTYPE html><html><head>${frameBypassScript}</head><body>${modifiedHtml}</body></html>`;
       }
       
       res.send(modifiedHtml);
