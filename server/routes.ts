@@ -623,16 +623,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.setHeader('X-Content-Type-Options', 'nosniff');
       res.status(response.status);
 
-      // STREAM the response body directly for faster delivery
+      // STREAM the response body directly for faster delivery with backpressure
       if (response.body) {
         const reader = response.body.getReader();
+        
         const pump = async (): Promise<void> => {
           try {
             while (true) {
               const { done, value } = await reader.read();
               if (done) break;
-              if (!res.writableEnded) {
-                res.write(Buffer.from(value));
+              if (res.writableEnded) break;
+              
+              const chunk = Buffer.from(value);
+              const canContinue = res.write(chunk);
+              
+              // Handle backpressure - wait for drain if buffer is full
+              if (!canContinue) {
+                await new Promise<void>(resolve => res.once('drain', resolve));
               }
             }
             if (!res.writableEnded) res.end();
@@ -640,6 +647,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             if (!res.writableEnded) res.end();
           }
         };
+        
+        // Handle client disconnect
+        res.on('close', () => reader.cancel());
         await pump();
       } else {
         // Fallback for responses without streaming body
@@ -715,16 +725,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length');
       res.status(response.status);
 
-      // Stream media content
+      // Stream media content with backpressure handling
       if (response.body) {
         const reader = response.body.getReader();
+        
         const pump = async (): Promise<void> => {
           try {
             while (true) {
               const { done, value } = await reader.read();
               if (done) break;
-              if (!res.writableEnded) {
-                res.write(Buffer.from(value));
+              if (res.writableEnded) break;
+              
+              const chunk = Buffer.from(value);
+              const canContinue = res.write(chunk);
+              
+              // Handle backpressure - wait for drain if buffer is full
+              if (!canContinue) {
+                await new Promise<void>(resolve => res.once('drain', resolve));
               }
             }
             if (!res.writableEnded) res.end();
@@ -732,6 +749,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             if (!res.writableEnded) res.end();
           }
         };
+        
+        // Handle client disconnect
+        res.on('close', () => reader.cancel());
         await pump();
       } else {
         const buffer = await response.arrayBuffer();
