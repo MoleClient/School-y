@@ -263,18 +263,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   try {
     var B="${baseUrl}";
     var P="${parsedUrl.protocol}";
+    var D="${domain}";
     
     // Bypass frame detection
     Object.defineProperty(window, 'top', { get: function() { return window.self; }, configurable: false });
     Object.defineProperty(window, 'parent', { get: function() { return window.self; }, configurable: false });
     Object.defineProperty(window, 'frameElement', { get: function() { return null; }, configurable: false });
-    Object.defineProperty(document, 'referrer', { get: function() { return ''; }, configurable: false });
     
-    // URL encoding for proxy (matches server-side encoding)
+    // Spoof location to match target origin (critical for SPA routing)
+    var fakeLocation = new URL(B);
+    try {
+      Object.defineProperty(document, 'domain', { get: function() { return D; }, configurable: true });
+    } catch(e) {}
+    
+    // URL encoding for proxy
     function encodeForProxy(url) {
       try {
-        if (!url || url.startsWith('data:') || url.startsWith('javascript:') || url.startsWith('#') || url.startsWith('blob:') || url.startsWith('mailto:') || url.startsWith('tel:')) return url;
+        if (!url || url.startsWith('data:') || url.startsWith('javascript:') || url.startsWith('blob:') || url.startsWith('mailto:') || url.startsWith('tel:')) return url;
         if (url.startsWith('/api/p')) return url;
+        if (url.startsWith('#')) return url;
         var abs = url;
         if (url.startsWith('//')) abs = P + url;
         else if (url.startsWith('/')) abs = B + url;
@@ -294,19 +301,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return url;
     }
     
+    // Check if URL is same-origin (for SPA routing)
+    function isSameOrigin(url) {
+      try {
+        if (url.startsWith('#') || url.startsWith('/')) return true;
+        var parsed = new URL(url, B);
+        return parsed.origin === B || parsed.hostname === D;
+      } catch(e) { return false; }
+    }
+    
     // XHR proxy - route through /api/xp
     var origOpen = XMLHttpRequest.prototype.open;
-    var origSend = XMLHttpRequest.prototype.send;
     XMLHttpRequest.prototype.open = function(method, url, async, user, pass) {
-      this._proxyMethod = method;
-      this._proxyUrl = makeAbs(url);
-      // Store original async value, default to true
-      this._proxyAsync = async !== false;
-      var proxyUrl = '/api/xp?u=' + encodeURIComponent(this._proxyUrl);
-      return origOpen.call(this, method, proxyUrl, this._proxyAsync, user, pass);
+      var absUrl = makeAbs(url);
+      var proxyUrl = '/api/xp?u=' + encodeURIComponent(absUrl);
+      return origOpen.call(this, method, proxyUrl, async !== false, user, pass);
     };
     
-    // Fetch proxy - route through /api/xp
+    // Fetch proxy - route through /api/xp  
     var origFetch = window.fetch;
     window.fetch = function(input, init) {
       try {
@@ -314,10 +326,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (url && !url.startsWith('/api/') && !url.startsWith('data:') && !url.startsWith('blob:')) {
           var absUrl = makeAbs(url);
           var proxyUrl = '/api/xp?u=' + encodeURIComponent(absUrl);
-          return origFetch.call(this, proxyUrl, init || {});
+          var newInit = init ? Object.assign({}, init) : {};
+          // Preserve method and body from Request objects
+          if (input && typeof input === 'object' && input.method) {
+            newInit.method = newInit.method || input.method;
+          }
+          return origFetch.call(this, proxyUrl, newInit);
         }
-      } catch(e) { console.error('Fetch proxy error:', e); }
+      } catch(e) {}
       return origFetch.apply(this, arguments);
+    };
+    
+    // History API shim - let SPAs manage their own routing
+    var origPushState = history.pushState;
+    var origReplaceState = history.replaceState;
+    history.pushState = function(state, title, url) {
+      // Allow internal routing to proceed normally
+      return origPushState.apply(this, arguments);
+    };
+    history.replaceState = function(state, title, url) {
+      return origReplaceState.apply(this, arguments);
     };
     
     // Intercept form submissions
@@ -330,20 +358,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       e.preventDefault();
       e.stopPropagation();
       
-      // Build the full target URL with form params for GET
       var targetUrl = action;
       if (action.startsWith('//')) targetUrl = P + action;
       else if (action.startsWith('/')) targetUrl = B + action;
       else if (!action.startsWith('http')) targetUrl = B + '/' + action;
       
       if ((form.method || 'get').toLowerCase() === 'get') {
-        // For GET: append form data to URL, then encode the whole thing
         var fd = new FormData(form);
         var params = new URLSearchParams(fd).toString();
         var fullUrl = targetUrl + (targetUrl.includes('?') ? '&' : '?') + params;
         window.location.href = encodeForProxy(fullUrl);
       } else {
-        // For POST: submit to our POST proxy endpoint
         var newForm = document.createElement('form');
         newForm.method = 'POST';
         newForm.action = '/api/pf';
@@ -365,14 +390,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     }, true);
     
-    // Handle link clicks - guard against non-Element targets
+    // Smart link click handler - allow SPA routing for same-origin
     document.addEventListener('click', function(e) {
       var target = e.target;
       if (!target || typeof target.closest !== 'function') return;
       var link = target.closest('a[href]');
       if (!link) return;
       var href = link.getAttribute('href');
-      if (!href || href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('/api/p')) return;
+      if (!href) return;
+      
+      // Allow hash links and javascript: to pass through
+      if (href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('tel:')) return;
+      
+      // Already proxied
+      if (href.startsWith('/api/p')) return;
+      
+      // For same-origin relative links, let the SPA router handle it if present
+      // This allows React Router, Next.js, etc. to work
+      if (href.startsWith('/') && !href.startsWith('//')) {
+        // Check if there's an SPA router listening
+        if (window.__NEXT_DATA__ || window.__remixContext || window.__REACT_DEVTOOLS_GLOBAL_HOOK__) {
+          // Let the SPA handle internal navigation
+          return;
+        }
+      }
+      
+      // External or cross-origin links go through proxy
       e.preventDefault();
       e.stopPropagation();
       window.location.href = encodeForProxy(href);
@@ -384,8 +427,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       let modifiedHtml = html;
 
-      // Remove base tag completely - we'll handle URLs ourselves
+      // Replace existing base tag with one pointing to target origin
+      // This helps SPAs resolve their internal routes correctly
       modifiedHtml = modifiedHtml.replace(/<base[^>]*>/gi, '');
+      const baseTag = `<base href="${baseUrl}/">`;
 
       // Frame bypass patterns
       modifiedHtml = modifiedHtml
@@ -445,14 +490,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // This uses ROT13 encoding so "reddit" becomes "erqqvg" which won't match filters
       modifiedHtml = obfuscateAllDomains(modifiedHtml, domain);
 
-      // Inject our script at the start of head
+      // Inject our script and base tag at the start of head
       if (modifiedHtml.includes('<head')) {
         modifiedHtml = modifiedHtml.replace(
           /<head([^>]*)>/i,
-          `<head$1>${frameBypassScript}`
+          `<head$1>${baseTag}${frameBypassScript}`
         );
       } else {
-        modifiedHtml = `<!DOCTYPE html><html><head>${frameBypassScript}</head><body>${modifiedHtml}</body></html>`;
+        modifiedHtml = `<!DOCTYPE html><html><head>${baseTag}${frameBypassScript}</head><body>${modifiedHtml}</body></html>`;
       }
       
       res.send(modifiedHtml);
