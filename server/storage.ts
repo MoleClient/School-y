@@ -1,20 +1,22 @@
-import { type User, type InsertUser } from "@shared/schema";
+import { type User, type InsertUser, type HistoryItem, type InsertHistoryItem } from "@shared/schema";
 import { randomUUID } from "crypto";
-
-// modify the interface with any CRUD methods
-// you might need
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+  
+  addHistoryItem(item: InsertHistoryItem): Promise<HistoryItem>;
+  getHistory(limit?: number): Promise<HistoryItem[]>;
 }
 
 export class MemStorage implements IStorage {
   private users: Map<string, User>;
+  private history: HistoryItem[];
 
   constructor() {
     this.users = new Map();
+    this.history = [];
   }
 
   async getUser(id: string): Promise<User | undefined> {
@@ -32,6 +34,24 @@ export class MemStorage implements IStorage {
     const user: User = { ...insertUser, id };
     this.users.set(id, user);
     return user;
+  }
+
+  async addHistoryItem(insertItem: InsertHistoryItem): Promise<HistoryItem> {
+    const id = randomUUID();
+    const item: HistoryItem = {
+      ...insertItem,
+      id,
+      visitedAt: new Date(),
+    };
+    this.history.unshift(item);
+    if (this.history.length > 100) {
+      this.history = this.history.slice(0, 100);
+    }
+    return item;
+  }
+
+  async getHistory(limit: number = 50): Promise<HistoryItem[]> {
+    return this.history.slice(0, limit);
   }
 }
 
