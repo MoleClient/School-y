@@ -53,7 +53,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   const proxyRateLimit = new Map<string, number[]>();
   const RATE_LIMIT_WINDOW = 60000;
-  const MAX_REQUESTS_PER_WINDOW = 30;
+  const MAX_REQUESTS_PER_WINDOW = 60;
+
+  const userAgents = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  ];
+
+  function isBlockPage(html: string): boolean {
+    const blockIndicators = [
+      'lightspeed', 'blocked', 'access denied', 'web filter', 'content filter',
+      'securly', 'goguardian', 'bark', 'net nanny', 'k9 web protection',
+      'this site has been blocked', 'access to this website', 'restricted content',
+      'network administrator', 'has been blocked by'
+    ];
+    const lowerHtml = html.toLowerCase();
+    const matchCount = blockIndicators.filter(indicator => lowerHtml.includes(indicator)).length;
+    return matchCount >= 2 || (lowerHtml.includes('blocked') && lowerHtml.includes('filter'));
+  }
+
+  async function fetchWithRetry(targetUrl: string, attempt: number = 0): Promise<Response> {
+    const ua = userAgents[attempt % userAgents.length];
+    const parsedUrl = new URL(targetUrl);
+    
+    const headers: Record<string, string> = {
+      'User-Agent': ua,
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept-Encoding': 'identity',
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'none',
+      'Sec-Fetch-User': '?1',
+      'Upgrade-Insecure-Requests': '1',
+      'Referer': `https://www.google.com/search?q=${encodeURIComponent(parsedUrl.hostname)}`,
+    };
+
+    return fetch(targetUrl, {
+      headers,
+      redirect: 'follow',
+      signal: AbortSignal.timeout(20000),
+    });
+  }
 
   app.get("/api/proxy", async (req, res) => {
     try {
@@ -92,43 +137,75 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).send("Access to private or local addresses is not allowed");
       }
 
-      const response = await fetch(targetUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Accept-Encoding': 'identity',
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache',
-        },
-        redirect: 'follow',
-        signal: AbortSignal.timeout(15000),
-      });
+      let response: Response | null = null;
+      let html = '';
+      let lastError: Error | null = null;
 
-      if (!response.ok) {
-        return res.status(response.status).send(`Failed to fetch: ${response.statusText}`);
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          response = await fetchWithRetry(targetUrl, attempt);
+          if (response.ok) {
+            html = await response.text();
+            if (!isBlockPage(html)) {
+              break;
+            }
+          }
+        } catch (err) {
+          lastError = err as Error;
+        }
+        await new Promise(r => setTimeout(r, 100 * (attempt + 1)));
+      }
+
+      if (!response || !response.ok) {
+        if (lastError?.name === 'AbortError') {
+          return res.status(504).send("Request timeout");
+        }
+        return res.status(response?.status || 500).send(`Failed to fetch: ${response?.statusText || 'Unknown error'}`);
       }
 
       const contentType = response.headers.get('content-type') || 'text/html';
       
       res.removeHeader('X-Frame-Options');
       res.removeHeader('Content-Security-Policy');
+      res.removeHeader('X-XSS-Protection');
       res.setHeader('Content-Type', contentType);
-      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Access-Control-Allow-Origin', '*');
       
-      const html = await response.text();
+      const baseUrl = `${parsedUrl.protocol}//${parsedUrl.host}`;
       
       const frameBypassScript = `
 <script>
 (function() {
-  if (window.top !== window.self) {
-    window.top = window.self;
-    window.parent = window.self;
-  }
-  Object.defineProperty(window, 'top', { get: function() { return window.self; }, configurable: false });
-  Object.defineProperty(window, 'parent', { get: function() { return window.self; }, configurable: false });
-  Object.defineProperty(window, 'frameElement', { get: function() { return null; }, configurable: false });
-  window.addEventListener('beforeunload', function(e) { e.stopImmediatePropagation(); }, true);
+  try {
+    Object.defineProperty(window, 'top', { get: function() { return window.self; }, configurable: false });
+    Object.defineProperty(window, 'parent', { get: function() { return window.self; }, configurable: false });
+    Object.defineProperty(window, 'frameElement', { get: function() { return null; }, configurable: false });
+    Object.defineProperty(document, 'referrer', { get: function() { return ''; }, configurable: false });
+    
+    window.addEventListener('beforeunload', function(e) { e.stopImmediatePropagation(); return undefined; }, true);
+    window.addEventListener('unload', function(e) { e.stopImmediatePropagation(); }, true);
+    
+    var origOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function() {
+      arguments[1] = arguments[1] || '';
+      if (arguments[1].startsWith('/')) {
+        arguments[1] = '${baseUrl}' + arguments[1];
+      }
+      return origOpen.apply(this, arguments);
+    };
+    
+    var origFetch = window.fetch;
+    window.fetch = function(url, opts) {
+      if (typeof url === 'string' && url.startsWith('/')) {
+        url = '${baseUrl}' + url;
+      }
+      return origFetch.call(this, url, opts);
+    };
+    
+    if (window.location.ancestorOrigins && window.location.ancestorOrigins.length > 0) {
+      Object.defineProperty(window.location, 'ancestorOrigins', { get: function() { return []; } });
+    }
+  } catch(e) {}
 })();
 </script>`;
 
@@ -137,8 +214,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .replace(/if\s*\(\s*(?:window\.)?self\s*!==?\s*(?:window\.)?(?:top|parent)\s*\)/gi, 'if(false)')
         .replace(/(?:window\.)?top\.location\s*[!=]==/gi, 'null==')
         .replace(/(?:window\.)?parent\.location\s*[!=]==/gi, 'null==')
-        .replace(/(?:window\.)?top\.location\s*=/gi, '(function(){})();//')
-        .replace(/(?:window\.)?parent\.location\s*=/gi, '(function(){})();//');
+        .replace(/(?:window\.)?top\.location\s*=/gi, 'void 0;//')
+        .replace(/(?:window\.)?parent\.location\s*=/gi, 'void 0;//')
+        .replace(/window\.top\s*&&/gi, 'false &&')
+        .replace(/window\.parent\s*&&/gi, 'false &&')
+        .replace(/inIframe|isIframe|inFrame|isFrame/gi, 'false')
+        .replace(/frameElement/gi, 'null');
+
+      modifiedHtml = modifiedHtml.replace(
+        /(<a\s+[^>]*href=["'])(?!https?:\/\/|javascript:|mailto:|tel:|#|data:)([^"']+)/gi,
+        `$1${baseUrl}$2`
+      );
+      
+      modifiedHtml = modifiedHtml.replace(
+        /(<(?:img|script|link|source|video|audio)\s+[^>]*(?:src|href)=["'])(?!https?:\/\/|javascript:|data:)([^"']+)/gi,
+        `$1${baseUrl}$2`
+      );
 
       modifiedHtml = modifiedHtml.replace(
         /<head([^>]*)>/i,
@@ -146,7 +237,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
       
       if (!modifiedHtml.includes('<head')) {
-        modifiedHtml = `<!DOCTYPE html><html><head><base href="${targetUrl}">${frameBypassScript}</head>${modifiedHtml}`;
+        modifiedHtml = `<!DOCTYPE html><html><head><base href="${targetUrl}">${frameBypassScript}</head><body>${modifiedHtml}</body></html>`;
       }
       
       res.send(modifiedHtml);
@@ -157,6 +248,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else {
         res.status(500).send("Failed to load webpage");
       }
+    }
+  });
+
+  app.get("/api/resource", async (req, res) => {
+    try {
+      const url = req.query.url as string;
+      if (!url) {
+        return res.status(400).send("URL required");
+      }
+
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': userAgents[0],
+          'Accept': '*/*',
+        },
+        signal: AbortSignal.timeout(10000),
+      });
+
+      if (!response.ok) {
+        return res.status(response.status).send("Failed to fetch resource");
+      }
+
+      const contentType = response.headers.get('content-type') || 'application/octet-stream';
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+
+      const buffer = await response.arrayBuffer();
+      res.send(Buffer.from(buffer));
+    } catch (error) {
+      res.status(500).send("Failed to fetch resource");
     }
   });
 
