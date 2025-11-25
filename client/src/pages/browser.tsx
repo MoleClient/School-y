@@ -65,33 +65,31 @@ export default function Browser() {
   const canGoForward = historyIndex < history.length - 1;
 
   return (
-    <div className="h-screen w-screen bg-gradient-to-br from-slate-100 via-blue-50 to-slate-100 dark:from-slate-950 dark:via-blue-950 dark:to-slate-950 p-0 md:p-3 overflow-hidden">
-      <div className="h-full w-full max-w-7xl mx-auto bg-background rounded-none md:rounded-xl shadow-2xl border border-border/50 flex flex-col overflow-hidden">
-        <BrowserChrome
-          currentUrl={currentUrl}
-          searchQuery={searchQuery}
-          onSearch={handleSearch}
-          onNavigate={handleNavigateToUrl}
-          onBack={handleBack}
-          onForward={handleForward}
-          onReload={handleReload}
-          canGoBack={canGoBack}
-          canGoForward={canGoForward}
-          view={view}
-        />
-        
-        <div className="flex-1 overflow-hidden">
-          {view === "home" ? (
-            <Homepage onSearch={handleSearch} onNavigate={handleNavigateToUrl} />
-          ) : view === "search" ? (
-            <SearchResults 
-              query={searchQuery} 
-              onResultClick={handleResultClick}
-            />
-          ) : (
-            <WebpageViewer url={currentUrl} />
-          )}
-        </div>
+    <div className="h-screen w-screen bg-background flex flex-col overflow-hidden">
+      <BrowserChrome
+        currentUrl={currentUrl}
+        searchQuery={searchQuery}
+        onSearch={handleSearch}
+        onNavigate={handleNavigateToUrl}
+        onBack={handleBack}
+        onForward={handleForward}
+        onReload={handleReload}
+        canGoBack={canGoBack}
+        canGoForward={canGoForward}
+        view={view}
+      />
+      
+      <div className="flex-1 overflow-hidden">
+        {view === "home" ? (
+          <Homepage onSearch={handleSearch} onNavigate={handleNavigateToUrl} />
+        ) : view === "search" ? (
+          <SearchResults 
+            query={searchQuery} 
+            onResultClick={handleResultClick}
+          />
+        ) : (
+          <WebpageViewer url={currentUrl} />
+        )}
       </div>
     </div>
   );

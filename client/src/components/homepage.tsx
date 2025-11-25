@@ -41,7 +41,7 @@ export function Homepage({ onSearch, onNavigate }: HomepageProps) {
   };
 
   return (
-    <div className="h-full flex flex-col items-center justify-center p-8 bg-gradient-to-b from-background via-background to-muted/20">
+    <div className="h-full flex flex-col items-center justify-center p-8 bg-background">
       <div className="text-center mb-12">
         <h1 className="text-5xl font-bold bg-gradient-to-r from-blue-600 via-purple-500 to-pink-500 bg-clip-text text-transparent mb-2">
           School-y

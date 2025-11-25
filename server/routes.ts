@@ -94,12 +94,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const response = await fetch(targetUrl, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Encoding': 'identity',
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache',
         },
         redirect: 'follow',
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(15000),
       });
 
       if (!response.ok) {
@@ -107,14 +110,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const contentType = response.headers.get('content-type') || 'text/html';
+      
+      res.removeHeader('X-Frame-Options');
+      res.removeHeader('Content-Security-Policy');
       res.setHeader('Content-Type', contentType);
+      res.setHeader('X-Content-Type-Options', 'nosniff');
       
       const html = await response.text();
       
-      const modifiedHtml = html.replace(
+      const frameBypassScript = `
+<script>
+(function() {
+  if (window.top !== window.self) {
+    window.top = window.self;
+    window.parent = window.self;
+  }
+  Object.defineProperty(window, 'top', { get: function() { return window.self; }, configurable: false });
+  Object.defineProperty(window, 'parent', { get: function() { return window.self; }, configurable: false });
+  Object.defineProperty(window, 'frameElement', { get: function() { return null; }, configurable: false });
+  window.addEventListener('beforeunload', function(e) { e.stopImmediatePropagation(); }, true);
+})();
+</script>`;
+
+      let modifiedHtml = html
+        .replace(/if\s*\(\s*(?:window\.)?(?:top|parent)\s*!==?\s*(?:window\.)?self\s*\)/gi, 'if(false)')
+        .replace(/if\s*\(\s*(?:window\.)?self\s*!==?\s*(?:window\.)?(?:top|parent)\s*\)/gi, 'if(false)')
+        .replace(/(?:window\.)?top\.location\s*[!=]==/gi, 'null==')
+        .replace(/(?:window\.)?parent\.location\s*[!=]==/gi, 'null==')
+        .replace(/(?:window\.)?top\.location\s*=/gi, '(function(){})();//')
+        .replace(/(?:window\.)?parent\.location\s*=/gi, '(function(){})();//');
+
+      modifiedHtml = modifiedHtml.replace(
         /<head([^>]*)>/i,
-        `<head$1><base href="${targetUrl}">`
+        `<head$1><base href="${targetUrl}">${frameBypassScript}`
       );
+      
+      if (!modifiedHtml.includes('<head')) {
+        modifiedHtml = `<!DOCTYPE html><html><head><base href="${targetUrl}">${frameBypassScript}</head>${modifiedHtml}`;
+      }
       
       res.send(modifiedHtml);
     } catch (error) {
