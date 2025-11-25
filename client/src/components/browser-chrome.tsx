@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, KeyboardEvent } from "react";
 import { ChevronLeft, ChevronRight, RotateCw, Search, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { BrowserView } from "@/pages/browser";
+import type { BrowserView } from "@/pages/browser";
 
 interface BrowserChromeProps {
   currentUrl: string;

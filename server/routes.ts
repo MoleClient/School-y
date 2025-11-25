@@ -160,6 +160,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
 function getDemoSearchResults(query: string): Array<{ title: string; url: string; description: string; favicon?: string }> {
   const lowerQuery = query.toLowerCase();
+  const queryWords = lowerQuery.split(/\s+/).filter(w => w.length > 1);
   
   const allResults = [
     {
@@ -260,13 +261,55 @@ function getDemoSearchResults(query: string): Array<{ title: string; url: string
     }
   ];
 
-  const filtered = allResults.filter(result => 
-    result.title.toLowerCase().includes(lowerQuery) ||
-    result.description.toLowerCase().includes(lowerQuery) ||
-    result.url.toLowerCase().includes(lowerQuery)
-  );
-
-  return filtered.length > 0 ? filtered.slice(0, 12) : allResults.slice(0, 8);
+  const scored = allResults.map(result => {
+    const titleLower = result.title.toLowerCase();
+    const descLower = result.description.toLowerCase();
+    const urlLower = result.url.toLowerCase();
+    const combined = `${titleLower} ${descLower} ${urlLower}`;
+    
+    let score = 0;
+    
+    if (titleLower.includes(lowerQuery)) score += 100;
+    if (descLower.includes(lowerQuery)) score += 50;
+    if (urlLower.includes(lowerQuery)) score += 75;
+    
+    for (const word of queryWords) {
+      if (titleLower.includes(word)) score += 30;
+      if (descLower.includes(word)) score += 15;
+      if (urlLower.includes(word)) score += 20;
+    }
+    
+    const categories: { [key: string]: string[] } = {
+      'video': ['youtube', 'netflix', 'streaming', 'watch', 'movie', 'film', 'tv', 'show'],
+      'social': ['twitter', 'reddit', 'linkedin', 'facebook', 'social', 'post', 'share', 'friends'],
+      'shopping': ['amazon', 'buy', 'shop', 'store', 'price', 'deal', 'product'],
+      'news': ['nytimes', 'bbc', 'news', 'article', 'breaking', 'world', 'politics'],
+      'learning': ['wikipedia', 'khan', 'mdn', 'learn', 'education', 'course', 'tutorial', 'study', 'school'],
+      'code': ['github', 'stackoverflow', 'developer', 'programming', 'code', 'coding', 'dev', 'software'],
+      'music': ['spotify', 'music', 'song', 'playlist', 'audio', 'listen'],
+      'reading': ['medium', 'blog', 'article', 'read', 'writing', 'story'],
+    };
+    
+    for (const [category, keywords] of Object.entries(categories)) {
+      if (queryWords.some(w => keywords.includes(w))) {
+        if (keywords.some(k => combined.includes(k))) {
+          score += 40;
+        }
+      }
+    }
+    
+    return { result, score };
+  });
+  
+  scored.sort((a, b) => b.score - a.score);
+  
+  const topResults = scored.filter(s => s.score > 0).slice(0, 12);
+  
+  if (topResults.length >= 4) {
+    return topResults.map(s => s.result);
+  }
+  
+  return scored.slice(0, 8).map(s => s.result);
 }
 
 async function fetchBraveSearchResults(query: string, apiKey: string): Promise<Array<{ title: string; url: string; description: string; favicon?: string }>> {
