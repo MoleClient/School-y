@@ -6,10 +6,14 @@ interface WebpageViewerProps {
   url: string;
 }
 
-function encodeUrl(url: string): string {
-  const reversed = url.split('').reverse().join('');
-  const encoded = btoa(reversed);
-  return encoded.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+// Convert URL to path-based proxy format: /w/domain.com/path
+function toProxyPath(url: string): string {
+  try {
+    const parsed = new URL(url.startsWith('http') ? url : `https://${url}`);
+    return `/w/${parsed.hostname}${parsed.pathname}${parsed.search}`;
+  } catch (e) {
+    return `/w/${url}`;
+  }
 }
 
 export function WebpageViewer({ url }: WebpageViewerProps) {
@@ -19,8 +23,8 @@ export function WebpageViewer({ url }: WebpageViewerProps) {
   const loadTimeoutRef = useRef<NodeJS.Timeout>();
 
   const cleanUrl = url.split('?_reload=')[0];
-  const encodedUrl = cleanUrl ? encodeUrl(cleanUrl) : "";
-  const proxyUrl = encodedUrl ? `/api/p?q=${encodedUrl}&t=${Date.now()}&a=${loadAttempt}` : "";
+  // Use new path-based proxy for better SPA support
+  const proxyUrl = cleanUrl ? `${toProxyPath(cleanUrl)}?_t=${Date.now()}&_a=${loadAttempt}` : "";
 
   useEffect(() => {
     if (cleanUrl) {
@@ -62,8 +66,7 @@ export function WebpageViewer({ url }: WebpageViewerProps) {
     setLoadAttempt(prev => prev + 1);
     
     if (iframeRef.current) {
-      const encoded = encodeUrl(cleanUrl);
-      iframeRef.current.src = `/api/p?q=${encoded}&r=${Date.now()}&a=${loadAttempt + 1}`;
+      iframeRef.current.src = `${toProxyPath(cleanUrl)}?_t=${Date.now()}&_a=${loadAttempt + 1}`;
     }
     
     if (loadTimeoutRef.current) {

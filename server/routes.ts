@@ -159,6 +159,364 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return result;
   }
 
+  // NEW: Path-based proxy that preserves URL structure for SPA routing
+  // Format: /w/domain.com/path or /w/https/domain.com/path
+  app.get("/w/*", async (req, res) => {
+    try {
+      // Rate limiting
+      const clientIp = req.ip || 'unknown';
+      const now = Date.now();
+      const requests = proxyRateLimit.get(clientIp) || [];
+      const recentRequests = requests.filter(time => now - time < RATE_LIMIT_WINDOW);
+      
+      if (recentRequests.length >= MAX_REQUESTS_PER_WINDOW) {
+        return res.status(429).send("Rate limit exceeded");
+      }
+      
+      recentRequests.push(now);
+      proxyRateLimit.set(clientIp, recentRequests);
+      
+      // Extract target from path: /w/domain.com/path or /w/https/domain.com/path
+      let pathPart = (req.params as Record<string, string>)[0] || '';
+      let targetUrl: string;
+      
+      if (pathPart.startsWith('https/')) {
+        targetUrl = 'https://' + pathPart.slice(6);
+      } else if (pathPart.startsWith('http/')) {
+        targetUrl = 'http://' + pathPart.slice(5);
+      } else {
+        targetUrl = 'https://' + pathPart;
+      }
+      
+      // Append query string if present (filter out internal params)
+      if (req.query && Object.keys(req.query).length > 0) {
+        const filteredQuery: Record<string, string> = {};
+        for (const [key, val] of Object.entries(req.query)) {
+          // Skip internal cache-busting params
+          if (!key.startsWith('_')) {
+            filteredQuery[key] = String(val);
+          }
+        }
+        if (Object.keys(filteredQuery).length > 0) {
+          const qs = new URLSearchParams(filteredQuery).toString();
+          targetUrl += (targetUrl.includes('?') ? '&' : '?') + qs;
+        }
+      }
+      
+      console.log("Path proxy target:", targetUrl);
+      
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(targetUrl);
+      } catch (e) {
+        return res.status(400).send("Invalid URL");
+      }
+
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        return res.status(400).send("Invalid protocol");
+      }
+
+      if (isPrivateOrLocalAddress(parsedUrl.hostname)) {
+        return res.status(403).send("Not allowed");
+      }
+
+      // Use fetchWithRetry for resilience
+      let response: Response | null = null;
+      let html = '';
+      
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          response = await fetchWithRetry(targetUrl, attempt);
+          if (response.ok) {
+            const contentType = response.headers.get('content-type') || '';
+            if (!contentType.includes('text/html')) {
+              // For non-HTML, stream directly
+              res.setHeader('Content-Type', contentType);
+              res.setHeader('Access-Control-Allow-Origin', '*');
+              if (response.body) {
+                const reader = response.body.getReader();
+                while (true) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+                  res.write(Buffer.from(value));
+                }
+                res.end();
+              }
+              return;
+            }
+            html = await response.text();
+            if (!isBlockPage(html)) {
+              break;
+            }
+          }
+        } catch (err) {
+          // continue trying
+        }
+        await new Promise(r => setTimeout(r, 100 * (attempt + 1)));
+      }
+      
+      if (!response || !html) {
+        return res.status(500).send("Could not connect");
+      }
+
+      const domain = parsedUrl.hostname;
+      const baseUrl = `${parsedUrl.protocol}//${parsedUrl.host}`;
+      const proxyBase = `/w/${domain}`;
+
+      res.removeHeader('X-Frame-Options');
+      res.removeHeader('Content-Security-Policy');
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+
+      // Inject a powerful SPA-aware script
+      const spaScript = `
+<script>
+(function() {
+  var B = "${baseUrl}";
+  var D = "${domain}";
+  var PB = "${proxyBase}";
+  
+  // Override frame detection
+  try {
+    Object.defineProperty(window, 'top', { get: function() { return window; }, configurable: false });
+    Object.defineProperty(window, 'parent', { get: function() { return window; }, configurable: false });
+    Object.defineProperty(window, 'frameElement', { get: function() { return null; }, configurable: false });
+  } catch(e) {}
+  
+  // Create DYNAMIC fake location object that updates with navigation
+  var realLocation = window.location;
+  
+  // Helper to get current target URL from real location
+  function getCurrentTargetUrl() {
+    var path = realLocation.pathname.replace(PB, '') || '/';
+    // Filter out internal params from search
+    var search = realLocation.search;
+    if (search) {
+      try {
+        var params = new URLSearchParams(search);
+        var filtered = new URLSearchParams();
+        params.forEach(function(v, k) {
+          if (!k.startsWith('_')) filtered.set(k, v);
+        });
+        search = filtered.toString() ? '?' + filtered.toString() : '';
+      } catch(e) {}
+    }
+    return B + path + search + realLocation.hash;
+  }
+  
+  try {
+    // Use Proxy for dynamic location that updates with navigation
+    var fakeLoc = new Proxy({}, {
+      get: function(target, prop) {
+        var currentUrl = getCurrentTargetUrl();
+        try {
+          var fakeUrl = new URL(currentUrl);
+          switch(prop) {
+            case 'href': return currentUrl;
+            case 'protocol': return fakeUrl.protocol;
+            case 'host': return fakeUrl.host;
+            case 'hostname': return fakeUrl.hostname;
+            case 'port': return fakeUrl.port || '';
+            case 'pathname': return fakeUrl.pathname;
+            case 'search': 
+              // Return filtered search without internal params
+              var params = new URLSearchParams(realLocation.search);
+              var filtered = new URLSearchParams();
+              params.forEach(function(v, k) {
+                if (!k.startsWith('_')) filtered.set(k, v);
+              });
+              return filtered.toString() ? '?' + filtered.toString() : '';
+            case 'hash': return realLocation.hash;
+            case 'origin': return fakeUrl.origin;
+            case 'assign': return function(u) { realLocation.assign(toProxy(u)); };
+            case 'replace': return function(u) { realLocation.replace(toProxy(u)); };
+            case 'reload': return function() { realLocation.reload(); };
+            case 'toString': return function() { return currentUrl; };
+            default: return undefined;
+          }
+        } catch(e) { return undefined; }
+      },
+      set: function(target, prop, value) {
+        if (prop === 'href') {
+          realLocation.href = toProxy(value);
+          return true;
+        }
+        return false;
+      }
+    });
+    
+    // Try to override location
+    try {
+      Object.defineProperty(window, 'location', { 
+        get: function() { return fakeLoc; },
+        set: function(v) { realLocation.href = toProxy(v); },
+        configurable: true 
+      });
+    } catch(e) {}
+    
+    try {
+      Object.defineProperty(document, 'location', { 
+        get: function() { return fakeLoc; },
+        set: function(v) { realLocation.href = toProxy(v); },
+        configurable: true 
+      });
+    } catch(e) {}
+  } catch(e) { console.error('Location spoof error:', e); }
+  
+  // Convert URL to proxy path
+  function toProxy(url) {
+    if (!url) return url;
+    if (typeof url !== 'string') url = String(url);
+    if (url.startsWith('data:') || url.startsWith('javascript:') || url.startsWith('blob:') || url.startsWith('#') || url.startsWith('mailto:') || url.startsWith('tel:')) return url;
+    if (url.startsWith('/w/')) return url;
+    
+    var abs = url;
+    if (url.startsWith('//')) abs = 'https:' + url;
+    else if (url.startsWith('/')) abs = B + url;
+    else if (!url.match(/^https?:\\/\\//)) abs = B + '/' + url;
+    
+    try {
+      var u = new URL(abs);
+      return '/w/' + u.hostname + u.pathname + u.search + u.hash;
+    } catch(e) { return url; }
+  }
+  
+  // XHR intercept
+  var _open = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function(m, url) {
+    var abs = url;
+    if (url && !url.startsWith('/w/') && !url.startsWith('data:') && !url.startsWith('blob:')) {
+      if (url.startsWith('//')) abs = 'https:' + url;
+      else if (url.startsWith('/')) abs = B + url;
+      else if (!url.match(/^https?:\\/\\//)) abs = B + '/' + url;
+      arguments[1] = '/api/xp?u=' + encodeURIComponent(abs);
+    }
+    return _open.apply(this, arguments);
+  };
+  
+  // Fetch intercept
+  var _fetch = window.fetch;
+  window.fetch = function(input, init) {
+    var url = typeof input === 'string' ? input : (input && input.url);
+    if (url && !url.startsWith('/w/') && !url.startsWith('/api/') && !url.startsWith('data:') && !url.startsWith('blob:')) {
+      var abs = url;
+      if (url.startsWith('//')) abs = 'https:' + url;
+      else if (url.startsWith('/')) abs = B + url;
+      else if (!url.match(/^https?:\\/\\//)) abs = B + '/' + url;
+      return _fetch.call(this, '/api/xp?u=' + encodeURIComponent(abs), init);
+    }
+    return _fetch.apply(this, arguments);
+  };
+  
+  // History API - critical for SPA routing
+  var _pushState = history.pushState;
+  var _replaceState = history.replaceState;
+  history.pushState = function(state, title, url) {
+    if (url && !url.startsWith('/w/')) {
+      url = toProxy(url);
+    }
+    return _pushState.call(this, state, title, url);
+  };
+  history.replaceState = function(state, title, url) {
+    if (url && !url.startsWith('/w/')) {
+      url = toProxy(url);
+    }
+    return _replaceState.call(this, state, title, url);
+  };
+  
+  // Intercept link clicks - ONLY for cross-origin links
+  // Let SPAs handle their own same-origin navigation
+  document.addEventListener('click', function(e) {
+    var link = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+    if (!link) return;
+    var href = link.getAttribute('href');
+    if (!href || href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('/w/')) return;
+    
+    // Check if this is a same-origin link that SPA routers should handle
+    try {
+      var abs = href;
+      if (href.startsWith('/') && !href.startsWith('//')) {
+        // Relative path - let SPA router handle it naturally
+        // Only intercept if there's no SPA framework detected
+        if (window.__NEXT_DATA__ || window.__remixContext || document.querySelector('[data-reactroot]') || document.querySelector('#__next') || document.querySelector('#root')) {
+          return; // Let React/Next/Remix handle it
+        }
+      }
+      if (href.startsWith('//')) abs = 'https:' + href;
+      else if (!href.match(/^https?:\\/\\//)) abs = B + (href.startsWith('/') ? '' : '/') + href;
+      
+      var linkUrl = new URL(abs);
+      if (linkUrl.hostname === D) {
+        // Same domain - let SPA handle if present
+        if (window.__NEXT_DATA__ || window.__remixContext || document.querySelector('[data-reactroot]')) {
+          return;
+        }
+      }
+    } catch(err) {}
+    
+    // Cross-origin or no SPA detected - use proxy
+    e.preventDefault();
+    e.stopPropagation();
+    realLocation.href = toProxy(href);
+  }, true);
+  
+})();
+</script>`;
+
+      // Remove existing base tags
+      html = html.replace(/<base[^>]*>/gi, '');
+      
+      // Add base tag pointing to proxy path
+      const baseTag = `<base href="${proxyBase}/">`;
+      
+      // Rewrite resource URLs to go through proxy
+      html = html.replace(
+        /(<(?:link|script|img|source|video|audio)[^>]*(?:src|href)=["'])([^"']+)(["'])/gi,
+        (match, prefix, url, suffix) => {
+          if (url.startsWith('data:') || url.startsWith('javascript:') || url.startsWith('/w/') || url.startsWith('/api/')) {
+            return match;
+          }
+          let abs = url;
+          if (url.startsWith('//')) abs = 'https:' + url;
+          else if (url.startsWith('/')) abs = baseUrl + url;
+          else if (!url.startsWith('http')) abs = baseUrl + '/' + url;
+          return prefix + '/api/xp?u=' + encodeURIComponent(abs) + suffix;
+        }
+      );
+      
+      // Rewrite anchor hrefs to use proxy path
+      html = html.replace(
+        /(<a[^>]*href=["'])([^"']+)(["'])/gi,
+        (match, prefix, url, suffix) => {
+          if (url.startsWith('#') || url.startsWith('javascript:') || url.startsWith('mailto:') || url.startsWith('tel:') || url.startsWith('/w/')) {
+            return match;
+          }
+          let abs = url;
+          if (url.startsWith('//')) abs = 'https:' + url;
+          else if (url.startsWith('/')) abs = baseUrl + url;
+          else if (!url.startsWith('http')) abs = baseUrl + '/' + url;
+          try {
+            const u = new URL(abs);
+            return prefix + '/w/' + u.hostname + u.pathname + u.search + suffix;
+          } catch(e) { return match; }
+        }
+      );
+      
+      // Inject script at start of head
+      if (html.includes('<head')) {
+        html = html.replace(/<head([^>]*)>/i, `<head$1>${baseTag}${spaScript}`);
+      } else {
+        html = `<!DOCTYPE html><html><head>${baseTag}${spaScript}</head><body>${html}</body></html>`;
+      }
+      
+      res.send(html);
+    } catch (error) {
+      console.error("Path proxy error:", error);
+      res.status(500).send("Proxy error");
+    }
+  });
+
+  // Keep the old query-based proxy for backward compatibility
   app.get("/api/p", async (req, res) => {
     try {
       const encoded = req.query.q as string;
