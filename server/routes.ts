@@ -102,11 +102,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   function decodeUrl(encoded: string): string {
     try {
-      const cleaned = encoded.replace(/-/g, '+').replace(/_/g, '/');
+      let cleaned = encoded.replace(/-/g, '+').replace(/_/g, '/');
+      const padding = (4 - (cleaned.length % 4)) % 4;
+      cleaned += '='.repeat(padding);
       const decoded = Buffer.from(cleaned, 'base64').toString('utf-8');
       return decoded.split('').reverse().join('');
-    } catch {
-      return encoded;
+    } catch (e) {
+      console.error('Decode error:', e);
+      return '';
     }
   }
 
