@@ -6,6 +6,12 @@ interface WebpageViewerProps {
   url: string;
 }
 
+function encodeUrl(url: string): string {
+  const reversed = url.split('').reverse().join('');
+  const encoded = btoa(reversed);
+  return encoded.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
 export function WebpageViewer({ url }: WebpageViewerProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -13,7 +19,8 @@ export function WebpageViewer({ url }: WebpageViewerProps) {
   const loadTimeoutRef = useRef<NodeJS.Timeout>();
 
   const cleanUrl = url.split('?_reload=')[0];
-  const proxyUrl = cleanUrl ? `/api/proxy?url=${encodeURIComponent(cleanUrl)}&t=${Date.now()}&attempt=${loadAttempt}` : "";
+  const encodedUrl = cleanUrl ? encodeUrl(cleanUrl) : "";
+  const proxyUrl = encodedUrl ? `/api/p?q=${encodedUrl}&t=${Date.now()}&a=${loadAttempt}` : "";
 
   useEffect(() => {
     if (cleanUrl) {
@@ -55,7 +62,8 @@ export function WebpageViewer({ url }: WebpageViewerProps) {
     setLoadAttempt(prev => prev + 1);
     
     if (iframeRef.current) {
-      iframeRef.current.src = `/api/proxy?url=${encodeURIComponent(cleanUrl)}&retry=${Date.now()}&attempt=${loadAttempt + 1}`;
+      const encoded = encodeUrl(cleanUrl);
+      iframeRef.current.src = `/api/p?q=${encoded}&r=${Date.now()}&a=${loadAttempt + 1}`;
     }
     
     if (loadTimeoutRef.current) {

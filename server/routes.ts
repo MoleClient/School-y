@@ -100,6 +100,157 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   }
 
+  function decodeUrl(encoded: string): string {
+    try {
+      const cleaned = encoded.replace(/-/g, '+').replace(/_/g, '/');
+      const decoded = Buffer.from(cleaned, 'base64').toString('utf-8');
+      return decoded.split('').reverse().join('');
+    } catch {
+      return encoded;
+    }
+  }
+
+  app.get("/api/p", async (req, res) => {
+    try {
+      const encoded = req.query.q as string;
+      if (!encoded) {
+        return res.status(400).send("Missing parameter");
+      }
+      
+      const url = decodeUrl(encoded);
+      const clientIp = req.ip || 'unknown';
+      
+      const now = Date.now();
+      const requests = proxyRateLimit.get(clientIp) || [];
+      const recentRequests = requests.filter(time => now - time < RATE_LIMIT_WINDOW);
+      
+      if (recentRequests.length >= MAX_REQUESTS_PER_WINDOW) {
+        return res.status(429).send("Rate limit exceeded");
+      }
+      
+      recentRequests.push(now);
+      proxyRateLimit.set(clientIp, recentRequests);
+
+      const targetUrl = url.startsWith("http") ? url : `https://${url}`;
+      
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(targetUrl);
+      } catch (e) {
+        return res.status(400).send("Invalid");
+      }
+
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        return res.status(400).send("Invalid protocol");
+      }
+
+      if (isPrivateOrLocalAddress(parsedUrl.hostname)) {
+        return res.status(403).send("Not allowed");
+      }
+
+      let response: Response | null = null;
+      let html = '';
+      let lastError: Error | null = null;
+
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          response = await fetchWithRetry(targetUrl, attempt);
+          if (response.ok) {
+            html = await response.text();
+            if (!isBlockPage(html)) {
+              break;
+            }
+          }
+        } catch (err) {
+          lastError = err as Error;
+        }
+        await new Promise(r => setTimeout(r, 100 * (attempt + 1)));
+      }
+
+      if (!response || !response.ok) {
+        return res.status(response?.status || 500).send("Error");
+      }
+
+      const contentType = response.headers.get('content-type') || 'text/html';
+      
+      res.removeHeader('X-Frame-Options');
+      res.removeHeader('Content-Security-Policy');
+      res.removeHeader('X-XSS-Protection');
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      
+      const baseUrl = `${parsedUrl.protocol}//${parsedUrl.host}`;
+      
+      const frameBypassScript = `
+<script>
+(function() {
+  try {
+    Object.defineProperty(window, 'top', { get: function() { return window.self; }, configurable: false });
+    Object.defineProperty(window, 'parent', { get: function() { return window.self; }, configurable: false });
+    Object.defineProperty(window, 'frameElement', { get: function() { return null; }, configurable: false });
+    Object.defineProperty(document, 'referrer', { get: function() { return ''; }, configurable: false });
+    window.addEventListener('beforeunload', function(e) { e.stopImmediatePropagation(); return undefined; }, true);
+    window.addEventListener('unload', function(e) { e.stopImmediatePropagation(); }, true);
+    var origOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function() {
+      arguments[1] = arguments[1] || '';
+      if (arguments[1].startsWith('/')) {
+        arguments[1] = '${baseUrl}' + arguments[1];
+      }
+      return origOpen.apply(this, arguments);
+    };
+    var origFetch = window.fetch;
+    window.fetch = function(url, opts) {
+      if (typeof url === 'string' && url.startsWith('/')) {
+        url = '${baseUrl}' + url;
+      }
+      return origFetch.call(this, url, opts);
+    };
+    if (window.location.ancestorOrigins && window.location.ancestorOrigins.length > 0) {
+      Object.defineProperty(window.location, 'ancestorOrigins', { get: function() { return []; } });
+    }
+  } catch(e) {}
+})();
+</script>`;
+
+      let modifiedHtml = html
+        .replace(/if\s*\(\s*(?:window\.)?(?:top|parent)\s*!==?\s*(?:window\.)?self\s*\)/gi, 'if(false)')
+        .replace(/if\s*\(\s*(?:window\.)?self\s*!==?\s*(?:window\.)?(?:top|parent)\s*\)/gi, 'if(false)')
+        .replace(/(?:window\.)?top\.location\s*[!=]==/gi, 'null==')
+        .replace(/(?:window\.)?parent\.location\s*[!=]==/gi, 'null==')
+        .replace(/(?:window\.)?top\.location\s*=/gi, 'void 0;//')
+        .replace(/(?:window\.)?parent\.location\s*=/gi, 'void 0;//')
+        .replace(/window\.top\s*&&/gi, 'false &&')
+        .replace(/window\.parent\s*&&/gi, 'false &&')
+        .replace(/inIframe|isIframe|inFrame|isFrame/gi, 'false')
+        .replace(/frameElement/gi, 'null');
+
+      modifiedHtml = modifiedHtml.replace(
+        /(<a\s+[^>]*href=["'])(?!https?:\/\/|javascript:|mailto:|tel:|#|data:)([^"']+)/gi,
+        `$1${baseUrl}$2`
+      );
+      
+      modifiedHtml = modifiedHtml.replace(
+        /(<(?:img|script|link|source|video|audio)\s+[^>]*(?:src|href)=["'])(?!https?:\/\/|javascript:|data:)([^"']+)/gi,
+        `$1${baseUrl}$2`
+      );
+
+      modifiedHtml = modifiedHtml.replace(
+        /<head([^>]*)>/i,
+        `<head$1><base href="${targetUrl}">${frameBypassScript}`
+      );
+      
+      if (!modifiedHtml.includes('<head')) {
+        modifiedHtml = `<!DOCTYPE html><html><head><base href="${targetUrl}">${frameBypassScript}</head><body>${modifiedHtml}</body></html>`;
+      }
+      
+      res.send(modifiedHtml);
+    } catch (error) {
+      console.error("Proxy error:", error);
+      res.status(500).send("Error");
+    }
+  });
+
   app.get("/api/proxy", async (req, res) => {
     try {
       const url = req.query.url as string;
