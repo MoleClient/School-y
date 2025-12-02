@@ -305,6 +305,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
   var B = "${baseUrl}";
   var KEY = ${OBFUSCATION_KEY};
   
+  // Disable Service Workers to prevent offline detection issues
+  if ('serviceWorker' in navigator) {
+    // Prevent new service worker registrations
+    navigator.serviceWorker.register = function() {
+      return Promise.reject(new Error('Service Workers disabled by proxy'));
+    };
+    // Unregister existing service workers
+    navigator.serviceWorker.getRegistrations().then(function(registrations) {
+      for (var i = 0; i < registrations.length; i++) {
+        registrations[i].unregister();
+      }
+    }).catch(function() {});
+  }
+  
+  // Disable cache API to prevent offline caching
+  if ('caches' in window) {
+    window.caches.open = function() {
+      return Promise.reject(new Error('Cache disabled by proxy'));
+    };
+    window.caches.delete = function() { return Promise.resolve(true); };
+    window.caches.keys = function() { return Promise.resolve([]); };
+  }
+  
+  // Force online status
+  Object.defineProperty(navigator, 'onLine', {
+    get: function() { return true; },
+    configurable: false
+  });
+  
   function toProxy(url) {
     if (!url) return url;
     if (url.startsWith('data:') || url.startsWith('javascript:') || url.startsWith('blob:') || url.startsWith('#') || url.startsWith('mailto:') || url.startsWith('tel:')) return url;
