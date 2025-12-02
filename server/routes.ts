@@ -1,8 +1,35 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
 import { searchResultSchema } from "@shared/schema";
 import { z } from "zod";
+
+// In-memory asset cache for faster repeat loads
+const assetCache = new Map<string, { data: Buffer; contentType: string; etag: string; timestamp: number }>();
+const CACHE_MAX_AGE = 5 * 60 * 1000; // 5 minutes
+const CACHE_MAX_SIZE = 100; // Max cached items
+
+function cleanCache() {
+  const now = Date.now();
+  const keysToDelete: string[] = [];
+  assetCache.forEach((value, key) => {
+    if (now - value.timestamp > CACHE_MAX_AGE) {
+      keysToDelete.push(key);
+    }
+  });
+  keysToDelete.forEach(key => assetCache.delete(key));
+  
+  // Evict oldest if over size limit
+  if (assetCache.size > CACHE_MAX_SIZE) {
+    const entries: Array<[string, { timestamp: number }]> = [];
+    assetCache.forEach((value, key) => entries.push([key, value]));
+    entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
+    for (let i = 0; i < entries.length - CACHE_MAX_SIZE; i++) {
+      assetCache.delete(entries[i][0]);
+    }
+  }
+}
 
 export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/search", async (req, res) => {
@@ -381,20 +408,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch(e) { return url; }
   }
   
-  // XHR intercept
+  // Helper: Check if URL is for cacheable assets
+  function isAssetUrl(url) {
+    if (!url) return false;
+    var ext = url.split('?')[0].split('#')[0].split('.').pop();
+    return ['js', 'css', 'woff', 'woff2', 'ttf', 'eot', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'ico', 'webp'].includes(ext);
+  }
+  
+  // Helper: Check if URL is for SSE/EventSource
+  function isSSEUrl(url, init) {
+    if (!url) return false;
+    if (init && init.headers) {
+      var accept = init.headers.Accept || init.headers.accept;
+      if (accept && accept.includes('text/event-stream')) return true;
+    }
+    return url.includes('/stream') || url.includes('/sse') || url.includes('/events');
+  }
+  
+  // XHR intercept with smart endpoint
   var _open = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function(m, url) {
     var abs = url;
-    if (url && !url.startsWith('/w/') && !url.startsWith('data:') && !url.startsWith('blob:')) {
+    if (url && !url.startsWith('/w/') && !url.startsWith('/api/') && !url.startsWith('data:') && !url.startsWith('blob:')) {
       if (url.startsWith('//')) abs = 'https:' + url;
       else if (url.startsWith('/')) abs = B + url;
       else if (!url.match(/^https?:\\/\\//)) abs = B + '/' + url;
-      arguments[1] = '/api/xp?u=' + encodeURIComponent(abs);
+      var endpoint = isAssetUrl(abs) ? '/api/asset' : '/api/xp';
+      arguments[1] = endpoint + '?u=' + encodeURIComponent(abs);
     }
     return _open.apply(this, arguments);
   };
   
-  // Fetch intercept
+  // Fetch intercept with smart endpoint selection
   var _fetch = window.fetch;
   window.fetch = function(input, init) {
     var url = typeof input === 'string' ? input : (input && input.url);
@@ -403,10 +448,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (url.startsWith('//')) abs = 'https:' + url;
       else if (url.startsWith('/')) abs = B + url;
       else if (!url.match(/^https?:\\/\\//)) abs = B + '/' + url;
-      return _fetch.call(this, '/api/xp?u=' + encodeURIComponent(abs), init);
+      var endpoint = isSSEUrl(abs, init) ? '/api/sse' : (isAssetUrl(abs) ? '/api/asset' : '/api/xp');
+      return _fetch.call(this, endpoint + '?u=' + encodeURIComponent(abs), init);
     }
     return _fetch.apply(this, arguments);
   };
+  
+  // EventSource intercept for SSE streaming
+  var _EventSource = window.EventSource;
+  if (_EventSource) {
+    window.EventSource = function(url, config) {
+      var abs = url;
+      if (url && !url.startsWith('/api/')) {
+        if (url.startsWith('//')) abs = 'https:' + url;
+        else if (url.startsWith('/')) abs = B + url;
+        else if (!url.match(/^https?:\\/\\//)) abs = B + '/' + url;
+        return new _EventSource('/api/sse?u=' + encodeURIComponent(abs), config);
+      }
+      return new _EventSource(url, config);
+    };
+    window.EventSource.CONNECTING = _EventSource.CONNECTING;
+    window.EventSource.OPEN = _EventSource.OPEN;
+    window.EventSource.CLOSED = _EventSource.CLOSED;
+  }
+  
+  // WebSocket intercept for real-time connections
+  var _WebSocket = window.WebSocket;
+  if (_WebSocket) {
+    window.WebSocket = function(url, protocols) {
+      if (url && !url.includes('localhost')) {
+        var wsBase = (realLocation.protocol === 'https:' ? 'wss://' : 'ws://') + realLocation.host;
+        var targetUrl = url.replace(/^wss?:\\/\\//, 'https://');
+        return new _WebSocket(wsBase + '/api/ws?u=' + encodeURIComponent(targetUrl), protocols);
+      }
+      return new _WebSocket(url, protocols);
+    };
+    window.WebSocket.CONNECTING = _WebSocket.CONNECTING;
+    window.WebSocket.OPEN = _WebSocket.OPEN;
+    window.WebSocket.CLOSING = _WebSocket.CLOSING;
+    window.WebSocket.CLOSED = _WebSocket.CLOSED;
+  }
   
   // History API - critical for SPA routing
   var _pushState = history.pushState;
@@ -1123,6 +1204,157 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // SSE (Server-Sent Events) proxy for real-time streaming (ChatGPT, etc.)
+  app.get("/api/sse", async (req, res) => {
+    try {
+      const targetUrl = req.query.u as string;
+      if (!targetUrl) {
+        return res.status(400).send("Missing URL");
+      }
+
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(targetUrl);
+      } catch (e) {
+        return res.status(400).send("Invalid URL");
+      }
+
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        return res.status(400).send("Invalid protocol");
+      }
+
+      if (isPrivateOrLocalAddress(parsedUrl.hostname)) {
+        return res.status(403).send("Not allowed");
+      }
+
+      // Set SSE headers
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.flushHeaders();
+
+      const response = await fetch(targetUrl, {
+        headers: {
+          'User-Agent': userAgents[Math.floor(Math.random() * userAgents.length)],
+          'Accept': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+        },
+      });
+
+      if (!response.ok) {
+        res.write(`event: error\ndata: ${response.status}\n\n`);
+        return res.end();
+      }
+
+      if (response.body) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        
+        const pump = async () => {
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done || res.writableEnded) break;
+              
+              const text = decoder.decode(value, { stream: true });
+              res.write(text);
+            }
+            if (!res.writableEnded) res.end();
+          } catch (err) {
+            if (!res.writableEnded) res.end();
+          }
+        };
+
+        res.on('close', () => reader.cancel());
+        await pump();
+      } else {
+        res.end();
+      }
+    } catch (error: any) {
+      console.error("SSE proxy error:", error.message);
+      if (!res.headersSent) {
+        res.status(500).send("SSE error");
+      }
+    }
+  });
+
+  // Cached asset endpoint for faster repeat loads
+  app.get("/api/asset", async (req, res) => {
+    try {
+      const targetUrl = req.query.u as string;
+      if (!targetUrl) {
+        return res.status(400).send("Missing URL");
+      }
+
+      // Check cache first
+      const cached = assetCache.get(targetUrl);
+      const clientEtag = req.headers['if-none-match'];
+      
+      if (cached && (Date.now() - cached.timestamp < CACHE_MAX_AGE)) {
+        if (clientEtag && clientEtag === cached.etag) {
+          return res.status(304).end();
+        }
+        res.setHeader('Content-Type', cached.contentType);
+        res.setHeader('ETag', cached.etag);
+        res.setHeader('Cache-Control', 'public, max-age=300');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        return res.send(cached.data);
+      }
+
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(targetUrl);
+      } catch (e) {
+        return res.status(400).send("Invalid URL");
+      }
+
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        return res.status(400).send("Invalid protocol");
+      }
+
+      if (isPrivateOrLocalAddress(parsedUrl.hostname)) {
+        return res.status(403).send("Not allowed");
+      }
+
+      const response = await fetch(targetUrl, {
+        headers: {
+          'User-Agent': userAgents[Math.floor(Math.random() * userAgents.length)],
+          'Accept': '*/*',
+        },
+        signal: AbortSignal.timeout(15000),
+      });
+
+      if (!response.ok) {
+        return res.status(response.status).send("Fetch failed");
+      }
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const contentType = response.headers.get('content-type') || 'application/octet-stream';
+      const etag = `"${Buffer.from(targetUrl).toString('base64').slice(0, 16)}-${buffer.length}"`;
+
+      // Cache for repeat requests
+      cleanCache();
+      assetCache.set(targetUrl, {
+        data: buffer,
+        contentType,
+        etag,
+        timestamp: Date.now()
+      });
+
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('ETag', etag);
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.send(buffer);
+    } catch (error: any) {
+      console.error("Asset proxy error:", error.message);
+      if (!res.headersSent) {
+        res.status(500).send("Asset error");
+      }
+    }
+  });
+
   // POST form proxy endpoint
   app.post("/api/pf", async (req, res) => {
     try {
@@ -1452,6 +1684,75 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   const httpServer = createServer(app);
+
+  // WebSocket tunneling for real-time connections
+  const wss = new WebSocketServer({ server: httpServer, path: '/api/ws' });
+  
+  wss.on('connection', (clientWs, req) => {
+    const urlParam = new URL(req.url || '', 'http://localhost').searchParams.get('u');
+    if (!urlParam) {
+      clientWs.close(1008, 'Missing URL');
+      return;
+    }
+
+    let targetUrl: URL;
+    try {
+      targetUrl = new URL(urlParam);
+    } catch (e) {
+      clientWs.close(1008, 'Invalid URL');
+      return;
+    }
+
+    // Convert to WebSocket URL
+    const wsUrl = urlParam.replace(/^http/, 'ws');
+    
+    let serverWs: WebSocket;
+    try {
+      serverWs = new WebSocket(wsUrl, {
+        headers: {
+          'User-Agent': userAgents[0],
+          'Origin': targetUrl.origin,
+        }
+      });
+    } catch (e) {
+      clientWs.close(1011, 'Connection failed');
+      return;
+    }
+
+    serverWs.on('open', () => {
+      console.log('WebSocket tunnel opened to:', targetUrl.hostname);
+    });
+
+    serverWs.on('message', (data) => {
+      if (clientWs.readyState === WebSocket.OPEN) {
+        clientWs.send(data);
+      }
+    });
+
+    serverWs.on('close', (code, reason) => {
+      clientWs.close(code, reason.toString());
+    });
+
+    serverWs.on('error', (err) => {
+      console.error('Server WS error:', err.message);
+      clientWs.close(1011, 'Server error');
+    });
+
+    clientWs.on('message', (data) => {
+      if (serverWs.readyState === WebSocket.OPEN) {
+        serverWs.send(data);
+      }
+    });
+
+    clientWs.on('close', () => {
+      serverWs.close();
+    });
+
+    clientWs.on('error', (err) => {
+      console.error('Client WS error:', err.message);
+      serverWs.close();
+    });
+  });
 
   return httpServer;
 }

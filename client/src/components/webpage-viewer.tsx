@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Loader2, ExternalLink, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -18,55 +18,91 @@ function toProxyPath(url: string): string {
 
 export function WebpageViewer({ url }: WebpageViewerProps) {
   const [isLoading, setIsLoading] = useState(true);
+  const [loadProgress, setLoadProgress] = useState(0);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const loadTimeoutRef = useRef<NodeJS.Timeout>();
+  const progressIntervalRef = useRef<NodeJS.Timeout>();
 
   const cleanUrl = url.split('?_reload=')[0];
-  // Use new path-based proxy for better SPA support
-  const proxyUrl = cleanUrl ? `${toProxyPath(cleanUrl)}?_t=${Date.now()}&_a=${loadAttempt}` : "";
+  // Use path-based proxy for better SPA support - no cache busting params needed
+  const proxyUrl = cleanUrl ? toProxyPath(cleanUrl) : "";
+
+  // Simulate loading progress for better UX
+  const startProgressSimulation = useCallback(() => {
+    setLoadProgress(0);
+    if (progressIntervalRef.current) {
+      clearInterval(progressIntervalRef.current);
+    }
+    progressIntervalRef.current = setInterval(() => {
+      setLoadProgress(prev => {
+        // Slow down as we approach 90%
+        if (prev >= 90) return prev;
+        const increment = Math.max(1, (90 - prev) / 10);
+        return Math.min(90, prev + increment);
+      });
+    }, 100);
+  }, []);
 
   useEffect(() => {
     if (cleanUrl) {
       setIsLoading(true);
       setLoadAttempt(0);
+      startProgressSimulation();
 
       if (loadTimeoutRef.current) {
         clearTimeout(loadTimeoutRef.current);
       }
 
+      // Longer timeout for complex SPAs
       loadTimeoutRef.current = setTimeout(() => {
         setIsLoading(false);
-      }, 25000);
+        setLoadProgress(100);
+      }, 45000);
     }
 
     return () => {
       if (loadTimeoutRef.current) {
         clearTimeout(loadTimeoutRef.current);
       }
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+      }
     };
-  }, [cleanUrl]);
+  }, [cleanUrl, startProgressSimulation]);
 
-  const handleLoad = () => {
+  const handleLoad = useCallback(() => {
     if (loadTimeoutRef.current) {
       clearTimeout(loadTimeoutRef.current);
     }
-    setIsLoading(false);
-  };
+    if (progressIntervalRef.current) {
+      clearInterval(progressIntervalRef.current);
+    }
+    // Animate to 100%
+    setLoadProgress(100);
+    setTimeout(() => setIsLoading(false), 150);
+  }, []);
 
-  const handleError = () => {
+  const handleError = useCallback(() => {
     if (loadTimeoutRef.current) {
       clearTimeout(loadTimeoutRef.current);
     }
+    if (progressIntervalRef.current) {
+      clearInterval(progressIntervalRef.current);
+    }
     setIsLoading(false);
-  };
+    setLoadProgress(0);
+  }, []);
 
-  const handleRetry = () => {
+  const handleRetry = useCallback(() => {
     setIsLoading(true);
     setLoadAttempt(prev => prev + 1);
+    startProgressSimulation();
     
     if (iframeRef.current) {
-      iframeRef.current.src = `${toProxyPath(cleanUrl)}?_t=${Date.now()}&_a=${loadAttempt + 1}`;
+      // Force reload by changing src
+      const newSrc = `${toProxyPath(cleanUrl)}?_r=${Date.now()}`;
+      iframeRef.current.src = newSrc;
     }
     
     if (loadTimeoutRef.current) {
@@ -74,8 +110,9 @@ export function WebpageViewer({ url }: WebpageViewerProps) {
     }
     loadTimeoutRef.current = setTimeout(() => {
       setIsLoading(false);
-    }, 25000);
-  };
+      setLoadProgress(100);
+    }, 45000);
+  }, [cleanUrl, startProgressSimulation]);
 
   if (!cleanUrl) {
     return (
@@ -87,6 +124,7 @@ export function WebpageViewer({ url }: WebpageViewerProps) {
 
   return (
     <div className="relative w-full h-full bg-white dark:bg-gray-900">
+      {/* Loading overlay with progress bar */}
       {isLoading && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-background z-10">
           <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
@@ -96,9 +134,17 @@ export function WebpageViewer({ url }: WebpageViewerProps) {
             <p className="font-medium text-foreground">Loading webpage...</p>
             <p className="text-sm text-muted-foreground mt-1 max-w-xs truncate">{cleanUrl}</p>
           </div>
+          {/* Progress bar */}
+          <div className="w-48 h-1 bg-muted rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-primary transition-all duration-150 ease-out"
+              style={{ width: `${loadProgress}%` }}
+            />
+          </div>
         </div>
       )}
 
+      {/* Action buttons - visible on hover */}
       <div className="absolute top-2 right-2 z-20 flex gap-2 opacity-0 hover:opacity-100 transition-opacity">
         <Button
           size="sm"
@@ -122,10 +168,16 @@ export function WebpageViewer({ url }: WebpageViewerProps) {
         </Button>
       </div>
 
+      {/* Optimized iframe with GPU acceleration hints */}
       <iframe
         ref={iframeRef}
         src={proxyUrl}
         className="w-full h-full border-0 bg-white dark:bg-gray-900"
+        style={{ 
+          transform: 'translateZ(0)',
+          willChange: 'transform',
+          backfaceVisibility: 'hidden'
+        }}
         title="Webpage viewer"
         onLoad={handleLoad}
         onError={handleError}
