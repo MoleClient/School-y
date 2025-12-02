@@ -2270,7 +2270,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const wss = new WebSocketServer({ server: httpServer, path: '/api/ws' });
   
   wss.on('connection', (clientWs, req) => {
-    const urlParam = new URL(req.url || '', 'http://localhost').searchParams.get('u');
+    const parsedReqUrl = new URL(req.url || '', 'http://localhost');
+    const urlParam = parsedReqUrl.searchParams.get('u');
+    const originParam = parsedReqUrl.searchParams.get('origin'); // Allow custom origin
+    
     if (!urlParam) {
       clientWs.close(1008, 'Missing URL');
       return;
@@ -2295,17 +2298,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return;
     }
 
-    console.log('WebSocket proxy connecting to:', wsUrl);
+    // For game servers that connect to raw IPs, use the provided origin or detect common games
+    let origin = originParam || targetUrl.origin;
+    const path = targetUrl.pathname;
+    
+    // Detect slither.io game servers (they use /ptc or /slither paths on raw IPs)
+    if (path === '/ptc' || path === '/slither') {
+      origin = 'http://slither.io';
+    }
+
+    console.log('WebSocket proxy connecting to:', wsUrl, 'with origin:', origin);
+    
+    // Force IPv4 for game servers that have unreachable IPv6
+    const forceIPv4 = !wsUrl.includes('['); // If not already an IPv6 literal
     
     let serverWs: WebSocket;
     try {
       serverWs = new WebSocket(wsUrl, {
         headers: {
-          'User-Agent': userAgents[0],
-          'Origin': targetUrl.origin,
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Origin': origin,
           'Host': targetUrl.host,
+          'Pragma': 'no-cache',
+          'Cache-Control': 'no-cache',
+          'Accept-Language': 'en-US,en;q=0.9',
         },
-        handshakeTimeout: 10000,
+        handshakeTimeout: 15000,
+        family: forceIPv4 ? 4 : undefined, // Force IPv4
+        perMessageDeflate: false, // Disable compression for binary protocols
       });
     } catch (e) {
       console.error('WebSocket connection failed:', e);
