@@ -2346,7 +2346,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     serverWs.on('close', (code, reason) => {
       console.log('Server WebSocket closed:', code, reason.toString());
       if (clientWs.readyState === WebSocket.OPEN) {
-        clientWs.close(code, reason.toString());
+        // Use valid close code (1006 is reserved and can't be sent)
+        const safeCode = (code >= 1000 && code <= 1003) || (code >= 3000 && code <= 4999) ? code : 1000;
+        clientWs.close(safeCode, reason.toString().slice(0, 123));
       }
     });
 
