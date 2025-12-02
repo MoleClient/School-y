@@ -583,10 +583,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Add base tag pointing to proxy path
       const baseTag = `<base href="${proxyBase}/">`;
       
+      // Helper: decode HTML entities in URLs
+      const decodeHtmlEntities = (str: string): string => {
+        return str
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'");
+      };
+      
+      // Helper: resolve URL against base, handling all relative path types
+      const resolveUrl = (url: string, base: string, currentPath: string): string => {
+        // Decode HTML entities first
+        url = decodeHtmlEntities(url);
+        
+        if (url.startsWith('data:') || url.startsWith('javascript:') || url.startsWith('blob:')) {
+          return url;
+        }
+        if (url.startsWith('//')) {
+          return 'https:' + url;
+        }
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+          return url;
+        }
+        if (url.startsWith('/')) {
+          return base + url;
+        }
+        // Relative path - resolve against current directory
+        const pathParts = currentPath.split('/');
+        pathParts.pop(); // Remove filename
+        return base + pathParts.join('/') + '/' + url;
+      };
+      
       // Helper to check for cacheable assets
       const isCacheableUrl = (url: string): boolean => {
         const lower = url.toLowerCase().split('?')[0].split('#')[0];
-        return ['.js', '.css', '.woff', '.woff2', '.ttf', '.eot', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.webp'].some(ext => lower.endsWith(ext));
+        return ['.js', '.css', '.woff', '.woff2', '.ttf', '.eot', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.webp', '.php'].some(ext => lower.endsWith(ext) || lower.includes(ext + '?'));
       };
       
       // Helper for media that needs streaming
@@ -595,17 +628,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return ['.mp4', '.webm', '.mp3', '.wav', '.ogg', '.m3u8', '.ts', '.m4a', '.flac', '.mkv', '.avi', '.mov'].some(ext => lower.includes(ext));
       };
       
+      const currentPath = parsedUrl.pathname;
+      
+      // Helper: check if URL is already a proxy URL (starts with /w/ followed by domain pattern)
+      const isProxyUrl = (url: string): boolean => {
+        if (!url.startsWith('/w/')) return false;
+        // Check if it matches /w/{domain}/ pattern (e.g., /w/en.wikipedia.org/...)
+        const afterW = url.substring(3);
+        // If next segment looks like a domain (has a dot), it's a proxy URL
+        const firstSlash = afterW.indexOf('/');
+        const firstSegment = firstSlash > 0 ? afterW.substring(0, firstSlash) : afterW;
+        return firstSegment.includes('.') && !firstSegment.includes('?');
+      };
+      
       // Rewrite resource URLs to go through optimized proxy endpoints
       html = html.replace(
         /(<(?:link|script|img|source|video|audio)[^>]*(?:src|href)=["'])([^"']+)(["'])/gi,
         (match, prefix, url, suffix) => {
-          if (url.startsWith('data:') || url.startsWith('javascript:') || url.startsWith('/w/') || url.startsWith('/api/')) {
+          if (url.startsWith('data:') || url.startsWith('javascript:') || isProxyUrl(url) || url.startsWith('/api/')) {
             return match;
           }
-          let abs = url;
-          if (url.startsWith('//')) abs = 'https:' + url;
-          else if (url.startsWith('/')) abs = baseUrl + url;
-          else if (!url.startsWith('http')) abs = baseUrl + '/' + url;
+          
+          const abs = resolveUrl(url, baseUrl, currentPath);
           
           // Route through optimized endpoints based on content type
           if (isStreamingMedia(abs) || prefix.toLowerCase().includes('video') || prefix.toLowerCase().includes('audio')) {
@@ -622,14 +666,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       html = html.replace(
         /(<a[^>]*href=["'])([^"']+)(["'])/gi,
         (match, prefix, url, suffix) => {
-          if (url.startsWith('#') || url.startsWith('javascript:') || url.startsWith('mailto:') || url.startsWith('tel:') || url.startsWith('/w/')) {
+          const decodedUrl = decodeHtmlEntities(url);
+          if (decodedUrl.startsWith('#') || decodedUrl.startsWith('javascript:') || decodedUrl.startsWith('mailto:') || decodedUrl.startsWith('tel:') || decodedUrl.startsWith('/w/')) {
             return match;
           }
-          let abs = url;
-          if (url.startsWith('//')) abs = 'https:' + url;
-          else if (url.startsWith('/')) abs = baseUrl + url;
-          else if (!url.startsWith('http')) abs = baseUrl + '/' + url;
           try {
+            const abs = resolveUrl(url, baseUrl, currentPath);
             const u = new URL(abs);
             return prefix + '/w/' + u.hostname + u.pathname + u.search + suffix;
           } catch(e) { return match; }
@@ -1347,10 +1389,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Cached asset endpoint for faster repeat loads
   app.get("/api/asset", async (req, res) => {
     try {
-      const targetUrl = req.query.u as string;
+      let targetUrl = req.query.u as string;
       if (!targetUrl) {
         return res.status(400).send("Missing URL");
       }
+      
+      // Decode HTML entities that might be in the URL
+      targetUrl = targetUrl
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"');
+      
+      console.log("Asset request:", targetUrl.substring(0, 100));
 
       // Check cache first
       const cached = assetCache.get(targetUrl);
