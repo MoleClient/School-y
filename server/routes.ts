@@ -550,7 +550,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Add base tag pointing to proxy path
       const baseTag = `<base href="${proxyBase}/">`;
       
-      // Rewrite resource URLs to go through proxy
+      // Helper to check for cacheable assets
+      const isCacheableUrl = (url: string): boolean => {
+        const lower = url.toLowerCase().split('?')[0].split('#')[0];
+        return ['.js', '.css', '.woff', '.woff2', '.ttf', '.eot', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.webp'].some(ext => lower.endsWith(ext));
+      };
+      
+      // Helper for media that needs streaming
+      const isStreamingMedia = (url: string): boolean => {
+        const lower = url.toLowerCase();
+        return ['.mp4', '.webm', '.mp3', '.wav', '.ogg', '.m3u8', '.ts', '.m4a', '.flac', '.mkv', '.avi', '.mov'].some(ext => lower.includes(ext));
+      };
+      
+      // Rewrite resource URLs to go through optimized proxy endpoints
       html = html.replace(
         /(<(?:link|script|img|source|video|audio)[^>]*(?:src|href)=["'])([^"']+)(["'])/gi,
         (match, prefix, url, suffix) => {
@@ -561,6 +573,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (url.startsWith('//')) abs = 'https:' + url;
           else if (url.startsWith('/')) abs = baseUrl + url;
           else if (!url.startsWith('http')) abs = baseUrl + '/' + url;
+          
+          // Route through optimized endpoints based on content type
+          if (isStreamingMedia(abs) || prefix.toLowerCase().includes('video') || prefix.toLowerCase().includes('audio')) {
+            return prefix + '/api/stream?u=' + encodeURIComponent(abs) + suffix;
+          }
+          if (isCacheableUrl(abs)) {
+            return prefix + '/api/asset?u=' + encodeURIComponent(abs) + suffix;
+          }
           return prefix + '/api/xp?u=' + encodeURIComponent(abs) + suffix;
         }
       );
@@ -919,14 +939,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       );
 
-      // Helper to check if URL is media content
+      // Helper to check if URL is media content (streaming)
       const isMediaUrl = (url: string): boolean => {
         const lower = url.toLowerCase();
         const mediaExts = ['.mp4', '.webm', '.mp3', '.wav', '.ogg', '.m3u8', '.ts', '.m4a', '.flac', '.mkv', '.avi', '.mov'];
         return mediaExts.some(ext => lower.includes(ext));
       };
       
-      // Rewrite resource URLs - route media through streaming endpoint
+      // Helper to check if URL is a cacheable static asset
+      const isCacheableAsset = (url: string): boolean => {
+        const lower = url.toLowerCase().split('?')[0].split('#')[0];
+        const cacheableExts = ['.js', '.css', '.woff', '.woff2', '.ttf', '.eot', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.webp'];
+        return cacheableExts.some(ext => lower.endsWith(ext));
+      };
+      
+      // Rewrite resource URLs - route through optimized endpoints
       modifiedHtml = modifiedHtml.replace(
         /(<(?:img|script|link|source|video|audio|iframe)\s+[^>]*(?:src|href)=["'])([^"']+)(["'])/gi,
         (match, prefix, url, suffix) => {
@@ -949,8 +976,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
             return prefix + '/api/stream?u=' + encodeURIComponent(absoluteUrl) + suffix;
           }
           
-          // Other resources use direct URL with base
-          return prefix + absoluteUrl + suffix;
+          // Route cacheable assets through cached endpoint for better performance
+          if (isCacheableAsset(absoluteUrl)) {
+            return prefix + '/api/asset?u=' + encodeURIComponent(absoluteUrl) + suffix;
+          }
+          
+          // Other resources use proxy
+          return prefix + '/api/xp?u=' + encodeURIComponent(absoluteUrl) + suffix;
         }
       );
 
