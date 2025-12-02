@@ -12,6 +12,11 @@ interface SearchResultsProps {
 export function SearchResults({ query, onResultClick }: SearchResultsProps) {
   const { data: results, isLoading } = useQuery<SearchResult[]>({
     queryKey: ["/api/search", query],
+    queryFn: async () => {
+      const res = await fetch(`/api/search?query=${encodeURIComponent(query)}`);
+      if (!res.ok) throw new Error("Search failed");
+      return res.json();
+    },
     enabled: !!query,
   });
 

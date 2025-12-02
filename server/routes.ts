@@ -5,6 +5,29 @@ import { storage } from "./storage";
 import { searchResultSchema } from "@shared/schema";
 import { z } from "zod";
 
+// URL obfuscation to bypass content filters
+// Uses a simple XOR + base64 encoding to hide domain names from DPI
+const OBFUSCATION_KEY = 0x5A; // XOR key
+
+function obfuscateUrl(url: string): string {
+  // XOR each character then base64 encode
+  const xored = url.split('').map(c => String.fromCharCode(c.charCodeAt(0) ^ OBFUSCATION_KEY)).join('');
+  return Buffer.from(xored).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+function deobfuscateUrl(encoded: string): string {
+  try {
+    // Restore base64 padding and decode
+    let b64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
+    while (b64.length % 4) b64 += '=';
+    const xored = Buffer.from(b64, 'base64').toString();
+    // XOR to get original
+    return xored.split('').map(c => String.fromCharCode(c.charCodeAt(0) ^ OBFUSCATION_KEY)).join('');
+  } catch (e) {
+    return '';
+  }
+}
+
 // In-memory asset cache for faster repeat loads
 const assetCache = new Map<string, { data: Buffer; contentType: string; etag: string; timestamp: number }>();
 const CACHE_MAX_AGE = 5 * 60 * 1000; // 5 minutes
@@ -185,6 +208,290 @@ export async function registerRoutes(app: Express): Promise<Server> {
     
     return result;
   }
+
+  // OBFUSCATED proxy endpoint - hides domain names from content filters
+  // Format: /b/{obfuscated_url} where the URL is XOR+base64 encoded
+  app.get("/b/:encoded", async (req, res) => {
+    try {
+      const clientIp = req.ip || 'unknown';
+      const now = Date.now();
+      const requests = proxyRateLimit.get(clientIp) || [];
+      const recentRequests = requests.filter(time => now - time < RATE_LIMIT_WINDOW);
+      
+      if (recentRequests.length >= MAX_REQUESTS_PER_WINDOW) {
+        return res.status(429).send("Rate limit exceeded");
+      }
+      
+      recentRequests.push(now);
+      proxyRateLimit.set(clientIp, recentRequests);
+      
+      // Decode the obfuscated URL
+      const targetUrl = deobfuscateUrl(req.params.encoded);
+      if (!targetUrl) {
+        return res.status(400).send("Invalid request");
+      }
+      
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(targetUrl);
+      } catch (e) {
+        return res.status(400).send("Invalid request");
+      }
+
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        return res.status(400).send("Invalid protocol");
+      }
+
+      if (isPrivateOrLocalAddress(parsedUrl.hostname)) {
+        return res.status(403).send("Not allowed");
+      }
+
+      let response: Response | null = null;
+      let html = '';
+      
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          response = await fetchWithRetry(targetUrl, attempt);
+          const buffer = await response.arrayBuffer();
+          html = new TextDecoder('utf-8').decode(buffer);
+          
+          if (!isBlockPage(html)) break;
+        } catch (error) {
+          if (attempt === 2) throw error;
+        }
+      }
+
+      if (!response) {
+        return res.status(500).send("Failed to fetch");
+      }
+
+      const contentType = response.headers.get('content-type') || 'text/html';
+      
+      if (!contentType.includes('text/html')) {
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        return res.send(Buffer.from(html));
+      }
+
+      const domain = parsedUrl.hostname;
+      const baseUrl = `${parsedUrl.protocol}//${parsedUrl.host}`;
+      const currentPath = parsedUrl.pathname;
+
+      // Helper functions for URL handling
+      const decodeHtmlEntities = (str: string): string => {
+        return str.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+      };
+      
+      const resolveUrl = (url: string): string => {
+        url = decodeHtmlEntities(url);
+        if (url.startsWith('data:') || url.startsWith('javascript:') || url.startsWith('blob:')) return url;
+        if (url.startsWith('//')) return 'https:' + url;
+        if (url.startsWith('http://') || url.startsWith('https://')) return url;
+        if (url.startsWith('/')) return baseUrl + url;
+        const pathParts = currentPath.split('/');
+        pathParts.pop();
+        return baseUrl + pathParts.join('/') + '/' + url;
+      };
+
+      // Create obfuscated URL for proxy
+      const toObfuscatedProxy = (url: string): string => {
+        const abs = resolveUrl(url);
+        return '/b/' + obfuscateUrl(abs);
+      };
+
+      // Inject script to handle navigation
+      const navScript = `<script>
+(function() {
+  var B = "${baseUrl}";
+  
+  function toProxy(url) {
+    if (!url) return url;
+    if (url.startsWith('data:') || url.startsWith('javascript:') || url.startsWith('blob:') || url.startsWith('#') || url.startsWith('mailto:') || url.startsWith('tel:')) return url;
+    if (url.startsWith('/b/')) return url;
+    
+    var abs = url;
+    if (url.startsWith('//')) abs = 'https:' + url;
+    else if (url.startsWith('/')) abs = B + url;
+    else if (!url.match(/^https?:\\/\\//)) abs = B + '/' + url;
+    
+    // XOR + base64 encode
+    var key = ${OBFUSCATION_KEY};
+    var xored = '';
+    for (var i = 0; i < abs.length; i++) {
+      xored += String.fromCharCode(abs.charCodeAt(i) ^ key);
+    }
+    var b64 = btoa(xored).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=/g, '');
+    return '/b/' + b64;
+  }
+  
+  function notifyParent(url) {
+    if (window.parent && window.parent !== window) {
+      try {
+        var realUrl = url;
+        if (url && url.startsWith('/b/')) {
+          // Decode to get real URL
+          var enc = url.substring(3);
+          var b64 = enc.replace(/-/g, '+').replace(/_/g, '/');
+          while (b64.length % 4) b64 += '=';
+          var xored = atob(b64);
+          realUrl = '';
+          for (var i = 0; i < xored.length; i++) {
+            realUrl += String.fromCharCode(xored.charCodeAt(i) ^ ${OBFUSCATION_KEY});
+          }
+        }
+        window.parent.postMessage({ type: 'navigation', url: realUrl }, '*');
+      } catch(e) {}
+    }
+  }
+  
+  // History API
+  var _pushState = history.pushState;
+  var _replaceState = history.replaceState;
+  history.pushState = function(state, title, url) {
+    if (url && !url.startsWith('/b/')) url = toProxy(url);
+    var result = _pushState.call(this, state, title, url);
+    notifyParent(url || location.pathname);
+    return result;
+  };
+  history.replaceState = function(state, title, url) {
+    if (url && !url.startsWith('/b/')) url = toProxy(url);
+    var result = _replaceState.call(this, state, title, url);
+    notifyParent(url || location.pathname);
+    return result;
+  };
+  
+  window.addEventListener('popstate', function() {
+    notifyParent(location.pathname);
+  });
+  
+  document.addEventListener('click', function(e) {
+    var link = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+    if (!link) return;
+    var href = link.getAttribute('href');
+    if (!href || href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('/b/')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    var proxyUrl = toProxy(href);
+    notifyParent(proxyUrl);
+    location.href = proxyUrl;
+  }, true);
+  
+  // XHR intercept
+  var _open = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function(m, url) {
+    if (url && !url.startsWith('/b/') && !url.startsWith('/api/') && !url.startsWith('data:') && !url.startsWith('blob:')) {
+      var abs = url;
+      if (url.startsWith('//')) abs = 'https:' + url;
+      else if (url.startsWith('/')) abs = B + url;
+      else if (!url.match(/^https?:\\/\\//)) abs = B + '/' + url;
+      arguments[1] = '/api/r?u=' + encodeURIComponent(abs);
+    }
+    return _open.apply(this, arguments);
+  };
+  
+  // Fetch intercept
+  var _fetch = window.fetch;
+  window.fetch = function(input, init) {
+    var url = typeof input === 'string' ? input : (input && input.url);
+    if (url && !url.startsWith('/b/') && !url.startsWith('/api/') && !url.startsWith('data:') && !url.startsWith('blob:')) {
+      var abs = url;
+      if (url.startsWith('//')) abs = 'https:' + url;
+      else if (url.startsWith('/')) abs = B + url;
+      else if (!url.match(/^https?:\\/\\//)) abs = B + '/' + url;
+      return _fetch.call(this, '/api/r?u=' + encodeURIComponent(abs), init);
+    }
+    return _fetch.apply(this, arguments);
+  };
+  
+  setTimeout(function() { notifyParent(location.pathname); }, 100);
+})();
+</script>`;
+
+      // Remove existing base tags and frame busters
+      html = html.replace(/<base[^>]*>/gi, '');
+      html = html
+        .replace(/if\s*\(\s*(?:window\.)?(?:top|parent)\s*!==?\s*(?:window\.)?self\s*\)/gi, 'if(false)')
+        .replace(/if\s*\(\s*(?:window\.)?self\s*!==?\s*(?:window\.)?(?:top|parent)\s*\)/gi, 'if(false)')
+        .replace(/(?:window\.)?top\.location\s*=/gi, 'void 0;//')
+        .replace(/(?:window\.)?parent\.location\s*=/gi, 'void 0;//');
+
+      // Rewrite resource URLs to use obfuscated proxy
+      html = html.replace(
+        /(<(?:link|script|img|source|video|audio)[^>]*(?:src|href)=["'])([^"']+)(["'])/gi,
+        (match, prefix, url, suffix) => {
+          if (url.startsWith('data:') || url.startsWith('javascript:') || url.startsWith('/b/') || url.startsWith('/api/')) {
+            return match;
+          }
+          const abs = resolveUrl(url);
+          return prefix + '/api/r?u=' + encodeURIComponent(abs) + suffix;
+        }
+      );
+
+      // Rewrite anchor hrefs
+      html = html.replace(
+        /(<a[^>]*href=["'])([^"']+)(["'])/gi,
+        (match, prefix, url, suffix) => {
+          const decoded = decodeHtmlEntities(url);
+          if (decoded.startsWith('#') || decoded.startsWith('javascript:') || decoded.startsWith('mailto:') || decoded.startsWith('tel:') || decoded.startsWith('/b/')) {
+            return match;
+          }
+          return prefix + toObfuscatedProxy(url) + suffix;
+        }
+      );
+
+      // Remove domain references
+      html = obfuscateAllDomains(html, domain);
+
+      // Inject script
+      if (html.includes('<head')) {
+        html = html.replace(/<head([^>]*)>/i, `<head$1>${navScript}`);
+      } else {
+        html = `<!DOCTYPE html><html><head>${navScript}</head><body>${html}</body></html>`;
+      }
+
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.send(html);
+    } catch (error) {
+      console.error("Obfuscated proxy error:", error);
+      res.status(500).send("Error");
+    }
+  });
+
+  // Obfuscated resource endpoint - for XHR/fetch requests
+  app.all("/api/r", async (req, res) => {
+    try {
+      const targetUrl = req.query.u as string;
+      if (!targetUrl) {
+        return res.status(400).send("Missing URL");
+      }
+
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(targetUrl);
+      } catch (e) {
+        return res.status(400).send("Invalid URL");
+      }
+
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        return res.status(400).send("Invalid protocol");
+      }
+
+      const response = await fetchWithRetry(targetUrl, 0);
+      const contentType = response.headers.get('content-type') || 'application/octet-stream';
+      
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', '*');
+      
+      const buffer = await response.arrayBuffer();
+      res.send(Buffer.from(buffer));
+    } catch (error) {
+      console.error("Resource proxy error:", error);
+      res.status(500).send("Error");
+    }
+  });
 
   // NEW: Path-based proxy that preserves URL structure for SPA routing
   // Format: /w/domain.com/path or /w/https/domain.com/path

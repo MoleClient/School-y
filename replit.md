@@ -9,6 +9,7 @@ A beautiful Safari-inspired web browser that allows users to search the web and 
 - **Embedded Webpage Viewer**: View websites without redirecting to new tabs using iframe technology
 - **URL Synchronization**: Address bar updates in real-time as you click links within pages (shows full paths like `www.website.com/article/name`)
 - **Navigation Controls**: Full browser history with back, forward, and reload functionality
+- **URL Obfuscation**: Domain names are XOR-encoded and base64-encoded to evade content filter detection
 - **Real-time Support**: WebSocket tunneling and SSE proxy for chat apps, live updates, and streaming content
 - **Asset Caching**: In-memory caching for static assets (JS, CSS, fonts, images) with ETag support
 - **Responsive Design**: Works beautifully on desktop, tablet, and mobile devices

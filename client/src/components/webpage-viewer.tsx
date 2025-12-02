@@ -7,13 +7,23 @@ interface WebpageViewerProps {
   onUrlChange?: (newUrl: string) => void;
 }
 
-// Convert URL to path-based proxy format: /w/domain.com/path
+// XOR key for URL obfuscation (must match server)
+const OBFUSCATION_KEY = 0x5A;
+
+// Obfuscate URL to hide domain names from content filters
+function obfuscateUrl(url: string): string {
+  const fullUrl = url.startsWith('http') ? url : `https://${url}`;
+  const xored = fullUrl.split('').map(c => String.fromCharCode(c.charCodeAt(0) ^ OBFUSCATION_KEY)).join('');
+  return btoa(xored).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+// Convert URL to obfuscated proxy format: /b/{encoded}
 function toProxyPath(url: string): string {
   try {
-    const parsed = new URL(url.startsWith('http') ? url : `https://${url}`);
-    return `/w/${parsed.hostname}${parsed.pathname}${parsed.search}`;
+    const fullUrl = url.startsWith('http') ? url : `https://${url}`;
+    return `/b/${obfuscateUrl(fullUrl)}`;
   } catch (e) {
-    return `/w/${url}`;
+    return `/b/${obfuscateUrl(url)}`;
   }
 }
 
