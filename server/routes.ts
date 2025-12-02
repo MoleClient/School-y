@@ -509,6 +509,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return _fetch.apply(this, arguments);
   };
   
+  // WebSocket intercept for real-time games
+  var _WebSocket = window.WebSocket;
+  window.WebSocket = function(url, protocols) {
+    if (url && !url.includes('/api/ws')) {
+      var abs = url;
+      if (url.startsWith('//')) abs = 'wss:' + url;
+      else if (url.startsWith('/')) abs = (B.replace('https:', 'wss:').replace('http:', 'ws:')) + url;
+      else if (!url.match(/^wss?:\\/\\//)) abs = 'wss://' + url;
+      
+      // Route through our WebSocket proxy
+      var wsProxyUrl = (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host + '/api/ws?u=' + encodeURIComponent(abs);
+      console.log('WebSocket proxied:', abs, '->', wsProxyUrl);
+      return new _WebSocket(wsProxyUrl, protocols);
+    }
+    return new _WebSocket(url, protocols);
+  };
+  window.WebSocket.prototype = _WebSocket.prototype;
+  window.WebSocket.CONNECTING = _WebSocket.CONNECTING;
+  window.WebSocket.OPEN = _WebSocket.OPEN;
+  window.WebSocket.CLOSING = _WebSocket.CLOSING;
+  window.WebSocket.CLOSED = _WebSocket.CLOSED;
+  
   // Rewrite target attributes on page load
   setTimeout(function() {
     var links = document.querySelectorAll('a[target="_blank"], a[target="_top"], a[target="_parent"]');
@@ -2254,16 +2276,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return;
     }
 
+    // Handle WebSocket URL - ensure it's wss:// or ws://
+    let wsUrl = urlParam;
+    if (wsUrl.startsWith('https://')) {
+      wsUrl = wsUrl.replace('https://', 'wss://');
+    } else if (wsUrl.startsWith('http://')) {
+      wsUrl = wsUrl.replace('http://', 'ws://');
+    } else if (!wsUrl.startsWith('wss://') && !wsUrl.startsWith('ws://')) {
+      wsUrl = 'wss://' + wsUrl;
+    }
+
     let targetUrl: URL;
     try {
-      targetUrl = new URL(urlParam);
+      targetUrl = new URL(wsUrl);
     } catch (e) {
+      console.error('Invalid WebSocket URL:', wsUrl);
       clientWs.close(1008, 'Invalid URL');
       return;
     }
 
-    // Convert to WebSocket URL
-    const wsUrl = urlParam.replace(/^http/, 'ws');
+    console.log('WebSocket proxy connecting to:', wsUrl);
     
     let serverWs: WebSocket;
     try {
@@ -2271,9 +2303,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         headers: {
           'User-Agent': userAgents[0],
           'Origin': targetUrl.origin,
-        }
+          'Host': targetUrl.host,
+        },
+        handshakeTimeout: 10000,
       });
     } catch (e) {
+      console.error('WebSocket connection failed:', e);
       clientWs.close(1011, 'Connection failed');
       return;
     }
@@ -2282,34 +2317,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('WebSocket tunnel opened to:', targetUrl.hostname);
     });
 
-    serverWs.on('message', (data) => {
+    serverWs.on('message', (data, isBinary) => {
       if (clientWs.readyState === WebSocket.OPEN) {
-        clientWs.send(data);
+        clientWs.send(data, { binary: isBinary });
       }
     });
 
     serverWs.on('close', (code, reason) => {
-      clientWs.close(code, reason.toString());
+      console.log('Server WebSocket closed:', code, reason.toString());
+      if (clientWs.readyState === WebSocket.OPEN) {
+        clientWs.close(code, reason.toString());
+      }
     });
 
     serverWs.on('error', (err) => {
       console.error('Server WS error:', err.message);
-      clientWs.close(1011, 'Server error');
+      if (clientWs.readyState === WebSocket.OPEN) {
+        clientWs.close(1011, 'Server error');
+      }
     });
 
-    clientWs.on('message', (data) => {
+    clientWs.on('message', (data, isBinary) => {
       if (serverWs.readyState === WebSocket.OPEN) {
-        serverWs.send(data);
+        serverWs.send(data, { binary: isBinary });
       }
     });
 
     clientWs.on('close', () => {
-      serverWs.close();
+      console.log('Client WebSocket closed');
+      if (serverWs.readyState === WebSocket.OPEN) {
+        serverWs.close();
+      }
     });
 
     clientWs.on('error', (err) => {
       console.error('Client WS error:', err.message);
-      serverWs.close();
+      if (serverWs.readyState === WebSocket.OPEN) {
+        serverWs.close();
+      }
     });
   });
 
