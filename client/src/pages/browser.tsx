@@ -61,6 +61,18 @@ export default function Browser() {
     }
   };
 
+  // Handle URL changes from iframe navigation (clicking links within pages)
+  const handleIframeUrlChange = (newUrl: string) => {
+    // Update the current URL without adding to history (iframe already navigated)
+    // This keeps the address bar in sync with what's displayed
+    setCurrentUrl(newUrl);
+    
+    // Update history to reflect the new URL
+    const newHistory = [...history.slice(0, historyIndex + 1), newUrl];
+    setHistory(newHistory);
+    setHistoryIndex(newHistory.length - 1);
+  };
+
   const canGoBack = historyIndex > 0;
   const canGoForward = historyIndex < history.length - 1;
 
@@ -88,7 +100,7 @@ export default function Browser() {
             onResultClick={handleResultClick}
           />
         ) : (
-          <WebpageViewer url={currentUrl} />
+          <WebpageViewer url={currentUrl} onUrlChange={handleIframeUrlChange} />
         )}
       </div>
     </div>

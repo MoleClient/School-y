@@ -489,6 +489,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     window.WebSocket.CLOSED = _WebSocket.CLOSED;
   }
   
+  // Notify parent window of URL changes
+  function notifyParent(newUrl) {
+    if (window.parent && window.parent !== window) {
+      try {
+        // Extract real URL from proxy path
+        var realUrl = newUrl;
+        if (newUrl && newUrl.startsWith('/w/')) {
+          var parts = newUrl.substring(3).split('/');
+          var host = parts[0];
+          var path = '/' + parts.slice(1).join('/');
+          realUrl = 'https://' + host + path;
+        }
+        window.parent.postMessage({ type: 'navigation', url: realUrl }, '*');
+      } catch(e) {}
+    }
+  }
+  
   // History API - critical for SPA routing
   var _pushState = history.pushState;
   var _replaceState = history.replaceState;
@@ -496,14 +513,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (url && !url.startsWith('/w/')) {
       url = toProxy(url);
     }
-    return _pushState.call(this, state, title, url);
+    var result = _pushState.call(this, state, title, url);
+    notifyParent(url || realLocation.pathname);
+    return result;
   };
   history.replaceState = function(state, title, url) {
     if (url && !url.startsWith('/w/')) {
       url = toProxy(url);
     }
-    return _replaceState.call(this, state, title, url);
+    var result = _replaceState.call(this, state, title, url);
+    notifyParent(url || realLocation.pathname);
+    return result;
   };
+  
+  // Listen for popstate (back/forward navigation)
+  window.addEventListener('popstate', function() {
+    notifyParent(realLocation.pathname);
+  });
   
   // Intercept link clicks - ONLY for cross-origin links
   // Let SPAs handle their own same-origin navigation
@@ -538,8 +564,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // Cross-origin or no SPA detected - use proxy
     e.preventDefault();
     e.stopPropagation();
-    realLocation.href = toProxy(href);
+    var proxyUrl = toProxy(href);
+    notifyParent(proxyUrl);
+    realLocation.href = proxyUrl;
   }, true);
+  
+  // Notify parent of initial URL on load
+  setTimeout(function() {
+    notifyParent(realLocation.pathname);
+  }, 100);
   
 })();
 </script>`;

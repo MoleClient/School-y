@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 
 interface WebpageViewerProps {
   url: string;
+  onUrlChange?: (newUrl: string) => void;
 }
 
 // Convert URL to path-based proxy format: /w/domain.com/path
@@ -16,7 +17,7 @@ function toProxyPath(url: string): string {
   }
 }
 
-export function WebpageViewer({ url }: WebpageViewerProps) {
+export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [loadProgress, setLoadProgress] = useState(0);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -27,6 +28,22 @@ export function WebpageViewer({ url }: WebpageViewerProps) {
   const cleanUrl = url.split('?_reload=')[0];
   // Use path-based proxy for better SPA support - no cache busting params needed
   const proxyUrl = cleanUrl ? toProxyPath(cleanUrl) : "";
+
+  // Listen for navigation messages from the iframe
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'navigation' && event.data.url) {
+        const newUrl = event.data.url;
+        // Only notify if the URL actually changed
+        if (newUrl && newUrl !== cleanUrl && onUrlChange) {
+          onUrlChange(newUrl);
+        }
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [cleanUrl, onUrlChange]);
 
   // Simulate loading progress for better UX
   const startProgressSimulation = useCallback(() => {
