@@ -303,45 +303,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const navScript = `<script>
 (function() {
   var B = "${baseUrl}";
+  var KEY = ${OBFUSCATION_KEY};
   
   function toProxy(url) {
     if (!url) return url;
     if (url.startsWith('data:') || url.startsWith('javascript:') || url.startsWith('blob:') || url.startsWith('#') || url.startsWith('mailto:') || url.startsWith('tel:')) return url;
-    if (url.startsWith('/b/')) return url;
+    if (url.startsWith('/b/') || url.startsWith('/api/')) return url;
     
     var abs = url;
     if (url.startsWith('//')) abs = 'https:' + url;
     else if (url.startsWith('/')) abs = B + url;
     else if (!url.match(/^https?:\\/\\//)) abs = B + '/' + url;
     
-    // XOR + base64 encode
-    var key = ${OBFUSCATION_KEY};
     var xored = '';
     for (var i = 0; i < abs.length; i++) {
-      xored += String.fromCharCode(abs.charCodeAt(i) ^ key);
+      xored += String.fromCharCode(abs.charCodeAt(i) ^ KEY);
     }
     var b64 = btoa(xored).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=/g, '');
     return '/b/' + b64;
   }
   
+  function decodeProxy(url) {
+    if (!url || !url.startsWith('/b/')) return url;
+    try {
+      var enc = url.substring(3);
+      var b64 = enc.replace(/-/g, '+').replace(/_/g, '/');
+      while (b64.length % 4) b64 += '=';
+      var xored = atob(b64);
+      var result = '';
+      for (var i = 0; i < xored.length; i++) {
+        result += String.fromCharCode(xored.charCodeAt(i) ^ KEY);
+      }
+      return result;
+    } catch(e) { return url; }
+  }
+  
   function notifyParent(url) {
     if (window.parent && window.parent !== window) {
       try {
-        var realUrl = url;
-        if (url && url.startsWith('/b/')) {
-          // Decode to get real URL
-          var enc = url.substring(3);
-          var b64 = enc.replace(/-/g, '+').replace(/_/g, '/');
-          while (b64.length % 4) b64 += '=';
-          var xored = atob(b64);
-          realUrl = '';
-          for (var i = 0; i < xored.length; i++) {
-            realUrl += String.fromCharCode(xored.charCodeAt(i) ^ ${OBFUSCATION_KEY});
-          }
-        }
-        window.parent.postMessage({ type: 'navigation', url: realUrl }, '*');
+        window.parent.postMessage({ type: 'navigation', url: decodeProxy(url) }, '*');
       } catch(e) {}
     }
+  }
+  
+  // Override window.open to stay in proxy
+  var _open = window.open;
+  window.open = function(url, target, features) {
+    if (url && !url.startsWith('/b/') && !url.startsWith('javascript:') && !url.startsWith('data:')) {
+      var proxyUrl = toProxy(url);
+      notifyParent(proxyUrl);
+      location.href = proxyUrl;
+      return null;
+    }
+    return _open.apply(this, arguments);
+  };
+  
+  // Override location assignment
+  var locDesc = Object.getOwnPropertyDescriptor(window, 'location');
+  if (locDesc && locDesc.configurable !== false) {
+    try {
+      var realLoc = window.location;
+      Object.defineProperty(window, 'location', {
+        get: function() { return realLoc; },
+        set: function(url) {
+          if (url && typeof url === 'string' && !url.startsWith('/b/')) {
+            realLoc.href = toProxy(url);
+          } else {
+            realLoc.href = url;
+          }
+        }
+      });
+    } catch(e) {}
   }
   
   // History API
@@ -364,20 +396,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
     notifyParent(location.pathname);
   });
   
+  // Click handler - catch all link clicks including target=_blank
   document.addEventListener('click', function(e) {
     var link = e.target && e.target.closest ? e.target.closest('a[href]') : null;
     if (!link) return;
     var href = link.getAttribute('href');
-    if (!href || href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('/b/')) return;
+    if (!href || href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('/b/')) return;
+    
     e.preventDefault();
     e.stopPropagation();
+    e.stopImmediatePropagation();
+    
     var proxyUrl = toProxy(href);
     notifyParent(proxyUrl);
     location.href = proxyUrl;
+    return false;
+  }, true);
+  
+  // Also handle mousedown for buttons that trigger on mousedown
+  document.addEventListener('mousedown', function(e) {
+    var link = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+    if (link) {
+      var target = link.getAttribute('target');
+      if (target === '_blank' || target === '_top' || target === '_parent') {
+        link.removeAttribute('target');
+      }
+    }
+  }, true);
+  
+  // Form submission interception
+  document.addEventListener('submit', function(e) {
+    var form = e.target;
+    if (!form || form.tagName !== 'FORM') return;
+    var action = form.getAttribute('action') || '';
+    if (action.startsWith('/b/') || action.startsWith('/api/')) return;
+    
+    e.preventDefault();
+    e.stopPropagation();
+    
+    var method = (form.getAttribute('method') || 'GET').toUpperCase();
+    var formData = new FormData(form);
+    
+    if (method === 'GET') {
+      var params = new URLSearchParams(formData).toString();
+      var url = action || location.pathname;
+      var fullUrl = url + (url.includes('?') ? '&' : '?') + params;
+      var proxyUrl = toProxy(fullUrl);
+      notifyParent(proxyUrl);
+      location.href = proxyUrl;
+    } else {
+      // POST - just navigate to action
+      var proxyUrl = toProxy(action || location.pathname);
+      notifyParent(proxyUrl);
+      location.href = proxyUrl;
+    }
+    return false;
   }, true);
   
   // XHR intercept
-  var _open = XMLHttpRequest.prototype.open;
+  var _xhrOpen = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function(m, url) {
     if (url && !url.startsWith('/b/') && !url.startsWith('/api/') && !url.startsWith('data:') && !url.startsWith('blob:')) {
       var abs = url;
@@ -386,7 +463,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       else if (!url.match(/^https?:\\/\\//)) abs = B + '/' + url;
       arguments[1] = '/api/r?u=' + encodeURIComponent(abs);
     }
-    return _open.apply(this, arguments);
+    return _xhrOpen.apply(this, arguments);
   };
   
   // Fetch intercept
@@ -403,7 +480,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return _fetch.apply(this, arguments);
   };
   
-  setTimeout(function() { notifyParent(location.pathname); }, 100);
+  // Rewrite target attributes on page load
+  setTimeout(function() {
+    var links = document.querySelectorAll('a[target="_blank"], a[target="_top"], a[target="_parent"]');
+    for (var i = 0; i < links.length; i++) {
+      links[i].removeAttribute('target');
+    }
+    notifyParent(location.pathname);
+  }, 100);
+  
+  // MutationObserver to catch dynamically added links
+  var observer = new MutationObserver(function(mutations) {
+    mutations.forEach(function(mutation) {
+      mutation.addedNodes.forEach(function(node) {
+        if (node.nodeType === 1) {
+          var links = node.querySelectorAll ? node.querySelectorAll('a[target="_blank"], a[target="_top"], a[target="_parent"]') : [];
+          for (var i = 0; i < links.length; i++) {
+            links[i].removeAttribute('target');
+          }
+          if (node.tagName === 'A' && (node.target === '_blank' || node.target === '_top' || node.target === '_parent')) {
+            node.removeAttribute('target');
+          }
+        }
+      });
+    });
+  });
+  observer.observe(document.documentElement, { childList: true, subtree: true });
 })();
 </script>`;
 
@@ -427,17 +529,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       );
 
-      // Rewrite anchor hrefs
+      // Rewrite anchor hrefs and remove target attributes
       html = html.replace(
-        /(<a[^>]*href=["'])([^"']+)(["'])/gi,
+        /(<a[^>]*href=["'])([^"']+)(["'][^>]*>)/gi,
         (match, prefix, url, suffix) => {
           const decoded = decodeHtmlEntities(url);
           if (decoded.startsWith('#') || decoded.startsWith('javascript:') || decoded.startsWith('mailto:') || decoded.startsWith('tel:') || decoded.startsWith('/b/')) {
             return match;
           }
-          return prefix + toObfuscatedProxy(url) + suffix;
+          // Remove target attribute from the suffix
+          const cleanSuffix = suffix.replace(/\s+target=["'][^"']*["']/gi, '');
+          return prefix + toObfuscatedProxy(url) + cleanSuffix;
         }
       );
+      
+      // Also remove standalone target attributes on links
+      html = html.replace(/<a\s([^>]*)\starget=["'](_blank|_top|_parent)["']([^>]*)>/gi, '<a $1$3>');
 
       // Remove domain references
       html = obfuscateAllDomains(html, domain);
