@@ -2670,10 +2670,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       origin = 'http://slither.io';
     }
 
-    console.log('WebSocket proxy connecting to:', wsUrl, 'with origin:', origin);
+    // Reject IPv6 connections immediately - Replit doesn't support IPv6
+    if (wsUrl.includes('[')) {
+      console.log('WebSocket: Rejecting IPv6 address (not supported):', wsUrl.substring(0, 50));
+      clientWs.close(1011, 'IPv6 not supported');
+      return;
+    }
     
-    // Force IPv4 for game servers that have unreachable IPv6
-    const forceIPv4 = !wsUrl.includes('['); // If not already an IPv6 literal
+    console.log('WebSocket proxy connecting to:', wsUrl, 'with origin:', origin);
     
     let serverWs: WebSocket;
     try {
@@ -2687,7 +2691,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           'Accept-Language': 'en-US,en;q=0.9',
         },
         handshakeTimeout: 15000,
-        family: forceIPv4 ? 4 : undefined, // Force IPv4
+        family: 4, // Always force IPv4
         perMessageDeflate: false, // Disable compression for binary protocols
       });
     } catch (e) {
