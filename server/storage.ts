@@ -8,15 +8,28 @@ export interface IStorage {
   
   addHistoryItem(item: InsertHistoryItem): Promise<HistoryItem>;
   getHistory(limit?: number): Promise<HistoryItem[]>;
+  
+  isIpAuthenticated(ip: string): boolean;
+  authenticateIp(ip: string): void;
 }
 
 export class MemStorage implements IStorage {
   private users: Map<string, User>;
   private history: HistoryItem[];
+  private authenticatedIps: Set<string>;
 
   constructor() {
     this.users = new Map();
     this.history = [];
+    this.authenticatedIps = new Set();
+  }
+  
+  isIpAuthenticated(ip: string): boolean {
+    return this.authenticatedIps.has(ip);
+  }
+  
+  authenticateIp(ip: string): void {
+    this.authenticatedIps.add(ip);
   }
 
   async getUser(id: string): Promise<User | undefined> {
