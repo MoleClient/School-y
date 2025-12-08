@@ -424,49 +424,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let contentType = 'text/html';
       let usedPuppeteer = false;
       
-      // First try regular fetch
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          response = await fetchWithRetry(targetUrl, attempt);
-          const buffer = await response.arrayBuffer();
-          html = new TextDecoder('utf-8').decode(buffer);
-          contentType = response.headers.get('content-type') || 'text/html';
-          
-          // Check if we got blocked (403) or Cloudflare challenge
-          if (response.status === 403 || 
-              html.includes('cf-chl-widget') || 
-              html.includes('challenge-running') ||
-              html.includes('Just a moment...') ||
-              html.includes('Checking your browser')) {
-            console.log(`[Proxy] Cloudflare detected on ${targetUrl}, trying Puppeteer fallback...`);
-            break; // Exit loop to try Puppeteer
-          }
-          
-          if (!isBlockPage(html)) {
-            break; // Success, exit loop
-          }
-        } catch (error) {
-          if (attempt === 1) {
-            console.log(`[Proxy] Regular fetch failed, trying Puppeteer...`);
-          }
-        }
-      }
+      // Check for force mode - skip regular fetch and go straight to Puppeteer
+      const forceMode = req.query.force === '1';
       
-      // If blocked or failed, try Puppeteer stealth browser
-      if (!response || response.status === 403 || 
-          html.includes('cf-chl-widget') || 
-          html.includes('challenge-running') ||
-          html.includes('Just a moment...')) {
+      if (forceMode) {
+        console.log(`[Proxy] Force mode enabled for ${targetUrl}, using Puppeteer directly...`);
         try {
           const puppeteerResult = await fetchWithPuppeteer(targetUrl);
           html = puppeteerResult.html;
           usedPuppeteer = true;
           contentType = 'text/html';
-          console.log(`[Proxy] Puppeteer succeeded for ${targetUrl}`);
+          console.log(`[Proxy] Force Puppeteer succeeded for ${targetUrl}`);
         } catch (puppeteerError) {
-          console.error(`[Proxy] Puppeteer also failed:`, puppeteerError);
-          if (!response) {
-            return res.status(500).send("Failed to fetch - site may be blocking proxy access");
+          console.error(`[Proxy] Force Puppeteer failed:`, puppeteerError);
+          return res.status(500).send("Force decrypt failed - site has advanced bot protection");
+        }
+      } else {
+        // First try regular fetch
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            response = await fetchWithRetry(targetUrl, attempt);
+            const buffer = await response.arrayBuffer();
+            html = new TextDecoder('utf-8').decode(buffer);
+            contentType = response.headers.get('content-type') || 'text/html';
+            
+            // Check if we got blocked (403) or Cloudflare challenge
+            if (response.status === 403 || 
+                html.includes('cf-chl-widget') || 
+                html.includes('challenge-running') ||
+                html.includes('Just a moment...') ||
+                html.includes('Checking your browser')) {
+              console.log(`[Proxy] Cloudflare detected on ${targetUrl}, trying Puppeteer fallback...`);
+              break; // Exit loop to try Puppeteer
+            }
+            
+            if (!isBlockPage(html)) {
+              break; // Success, exit loop
+            }
+          } catch (error) {
+            if (attempt === 1) {
+              console.log(`[Proxy] Regular fetch failed, trying Puppeteer...`);
+            }
+          }
+        }
+        
+        // If blocked or failed, try Puppeteer stealth browser
+        if (!response || response.status === 403 || 
+            html.includes('cf-chl-widget') || 
+            html.includes('challenge-running') ||
+            html.includes('Just a moment...')) {
+          try {
+            const puppeteerResult = await fetchWithPuppeteer(targetUrl);
+            html = puppeteerResult.html;
+            usedPuppeteer = true;
+            contentType = 'text/html';
+            console.log(`[Proxy] Puppeteer succeeded for ${targetUrl}`);
+          } catch (puppeteerError) {
+            console.error(`[Proxy] Puppeteer also failed:`, puppeteerError);
+            if (!response) {
+              return res.status(500).send("Failed to fetch - site may be blocking proxy access");
+            }
           }
         }
       }

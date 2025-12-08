@@ -41,6 +41,22 @@ interface WebpageViewerProps {
   onUrlChange?: (newUrl: string) => void;
 }
 
+// Sites known to have aggressive Cloudflare protection
+const PROTECTED_SITES = [
+  'downdetector.com',
+  'instagram.com',
+  'tiktok.com',
+  'facebook.com',
+  'twitter.com',
+  'x.com',
+  'linkedin.com',
+  'discord.com',
+  'openai.com',
+  'chatgpt.com',
+  'anthropic.com',
+  'claude.ai',
+];
+
 // XOR key for URL obfuscation (must match server)
 const OBFUSCATION_KEY = 0x5A;
 
@@ -116,13 +132,20 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [loadProgress, setLoadProgress] = useState(0);
   const [loadAttempt, setLoadAttempt] = useState(0);
+  const [forceMode, setForceMode] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [failReason, setFailReason] = useState('');
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const loadTimeoutRef = useRef<NodeJS.Timeout>();
   const progressIntervalRef = useRef<NodeJS.Timeout>();
 
   const cleanUrl = url.split('?_reload=')[0];
-  // Use path-based proxy for better SPA support - no cache busting params needed
-  const proxyUrl = cleanUrl ? toProxyPath(cleanUrl) : "";
+  
+  // Check if this is a known protected site
+  const isProtectedSite = cleanUrl ? PROTECTED_SITES.some(site => cleanUrl.includes(site)) : false;
+  
+  // Use path-based proxy format with optional force mode
+  const proxyUrl = cleanUrl ? `${toProxyPath(cleanUrl)}${forceMode ? '?force=1' : ''}` : "";
 
   // Listen for navigation and download messages from the iframe
   useEffect(() => {
@@ -173,17 +196,24 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
     if (cleanUrl) {
       setIsLoading(true);
       setLoadAttempt(0);
+      setLoadFailed(false);
+      setFailReason('');
       startProgressSimulation();
 
       if (loadTimeoutRef.current) {
         clearTimeout(loadTimeoutRef.current);
       }
 
-      // Longer timeout for complex SPAs
+      // Longer timeout for complex SPAs - show failure state after timeout
       loadTimeoutRef.current = setTimeout(() => {
         setIsLoading(false);
         setLoadProgress(100);
-      }, 45000);
+        // If still showing challenge page, mark as failed
+        if (isProtectedSite) {
+          setLoadFailed(true);
+          setFailReason('This site uses advanced bot protection that blocks proxy access.');
+        }
+      }, forceMode ? 90000 : 45000); // Longer timeout in force mode
     }
 
     return () => {
@@ -194,6 +224,28 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
         clearInterval(progressIntervalRef.current);
       }
     };
+  }, [cleanUrl, startProgressSimulation, isProtectedSite, forceMode]);
+  
+  // Force decrypt handler
+  const handleForceDecrypt = useCallback(() => {
+    setForceMode(true);
+    setIsLoading(true);
+    setLoadFailed(false);
+    setLoadProgress(0);
+    startProgressSimulation();
+    
+    if (iframeRef.current) {
+      const forcePath = `${toProxyPath(cleanUrl)}?force=1&t=${Date.now()}`;
+      iframeRef.current.src = forcePath;
+    }
+    
+    if (loadTimeoutRef.current) {
+      clearTimeout(loadTimeoutRef.current);
+    }
+    loadTimeoutRef.current = setTimeout(() => {
+      setIsLoading(false);
+      setLoadProgress(100);
+    }, 90000); // 90 second timeout for force mode
   }, [cleanUrl, startProgressSimulation]);
 
   const handleLoad = useCallback(() => {
@@ -332,7 +384,7 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
             {/* Progress bar */}
             <div className="w-64 space-y-2">
               <div className="flex justify-between text-xs font-mono text-muted-foreground">
-                <span>Progress</span>
+                <span>{forceMode ? 'Force Mode' : 'Progress'}</span>
                 <span>{Math.round(loadProgress)}%</span>
               </div>
               <div className="h-2 bg-black/50 rounded-full overflow-hidden border border-primary/20">
@@ -343,6 +395,64 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
                   <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-pulse" />
                 </div>
               </div>
+            </div>
+            
+            {/* Force Decrypt button - show after some loading time */}
+            {loadProgress > 30 && !forceMode && (
+              <Button
+                variant="outline"
+                onClick={handleForceDecrypt}
+                className="border-primary/50 text-primary hover:bg-primary/20"
+                data-testid="button-force-decrypt"
+              >
+                <Shield className="w-4 h-4 mr-2" />
+                Force Decrypt
+              </Button>
+            )}
+            
+            {/* Protected site warning */}
+            {isProtectedSite && (
+              <div className="text-center text-xs text-yellow-500/70 max-w-xs">
+                <span className="font-mono">Warning: This site has advanced protection</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      
+      {/* Failed to load overlay */}
+      {loadFailed && !isLoading && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/95 z-10">
+          <div className="flex flex-col items-center gap-6 p-8 text-center">
+            <div className="w-20 h-20 rounded-full bg-destructive/10 border-2 border-destructive/30 flex items-center justify-center">
+              <Shield className="w-10 h-10 text-destructive" />
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-xl font-bold text-destructive uppercase tracking-wider">
+                Access Blocked
+              </h3>
+              <p className="text-sm text-muted-foreground max-w-sm">
+                {failReason}
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <Button
+                variant="outline"
+                onClick={handleForceDecrypt}
+                className="border-primary/50"
+                data-testid="button-retry-force"
+              >
+                <Shield className="w-4 h-4 mr-2" />
+                Try Force Decrypt
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => window.open(cleanUrl, "_blank")}
+                data-testid="button-open-external"
+              >
+                <ExternalLink className="w-4 h-4 mr-2" />
+                Open Externally
+              </Button>
             </div>
           </div>
         </div>

@@ -1,0 +1,51 @@
+rver WebSocket closed: 1006 
+Client WebSocket closed
+Server WebSocket closed: 1006 
+Client WebSocket closed
+Client WebSocket closed
+Server WebSocket closed: 1006 
+Client WebSocket closed
+Server WebSocket closed: 1006 
+Server WebSocket closed: 1006 
+Client WebSocket closed
+Client WebSocket closed
+Server WebSocket closed: 1006 
+Client WebSocket closed
+Server WebSocket closed: 1006 
+Client WebSocket closed
+Server WebSocket closed: 1006 
+Server WebSocket closed: 1006 
+Server WebSocket closed: 1006 
+Client WebSocket closed
+Client WebSocket closed
+Client WebSocket closed
+Server WebSocket closed: 1006 
+Client WebSocket closed
+Server WebSocket closed: 1006 
+Client WebSocket closed
+Server WebSocket closed: 1006 
+Client WebSocket closed
+Server WebSocket closed: 1006 
+Client WebSocket closed
+[Puppeteer] Cloudflare challenge in progress, waiting... (attempt 1/12)
+[Puppeteer] Cloudflare challenge in progress, waiting... (attempt 2/12)
+[Puppeteer] Cloudflare challenge in progress, waiting... (attempt 3/12)
+[Puppeteer] Cloudflare challenge in progress, waiting... (attempt 4/12)
+[Puppeteer] Cloudflare challenge in progress, waiting... (attempt 5/12)
+[Puppeteer] Cloudflare challenge in progress, waiting... (attempt 6/12)
+[Puppeteer] Cloudflare challenge in progress, waiting... (attempt 7/12)
+[Puppeteer] Cloudflare challenge in progress, waiting... (attempt 8/12)
+[Puppeteer] Cloudflare challenge in progress, waiting... (attempt 9/12)
+[Puppeteer] Cloudflare challenge in progress, waiting... (attempt 10/12)
+[Puppeteer] Cloudflare challenge in progress, waiting... (attempt 11/12)
+[Puppeteer] Cloudflare challenge in progress, waiting... (attempt 12/12)
+[Puppeteer] Got 18127 bytes, status 403
+[Proxy] Puppeteer succeeded for https://downdetector.com
+10:13:19 PM [express] GET /api/r 200 in 125ms
+10:13:19 PM [express] GET /api/r 304 in 79ms
+Fetching https://downdetector.com/ with UA: Mozilla/5.0 (Windows NT 10.0; ...
+Response status: 403 Forbidden
+[Proxy] Cloudflare detected on https://downdetector.com/, trying Puppeteer fallback...
+[Puppeteer] Fetching https://downdetector.com/ with stealth browser...
+[Puppeteer] Cloudflare challenge in progress, waiting... (attempt 1/12)
+[Puppeteer] Cloudflare challenge in progress, waiting... (attempt 2/12)
