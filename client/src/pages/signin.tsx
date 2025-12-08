@@ -19,8 +19,8 @@ export default function SignIn() {
     },
     onSuccess: (data) => {
       if (data.success) {
-        queryClient.invalidateQueries({ queryKey: ["/api/auth/status"] });
-        setLocation("/");
+        // Force a hard reload to ensure auth state is fresh
+        window.location.href = "/";
       }
     },
     onError: () => {
