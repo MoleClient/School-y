@@ -422,38 +422,64 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
       
       {/* Failed to load overlay */}
       {loadFailed && !isLoading && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/95 z-10">
-          <div className="flex flex-col items-center gap-6 p-8 text-center">
-            <div className="w-20 h-20 rounded-full bg-destructive/10 border-2 border-destructive/30 flex items-center justify-center">
-              <Shield className="w-10 h-10 text-destructive" />
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/95 z-10 overflow-auto">
+          <div className="flex flex-col items-center gap-4 p-6 text-center max-w-md">
+            <div className="w-16 h-16 rounded-full bg-yellow-500/10 border-2 border-yellow-500/30 flex items-center justify-center">
+              <Shield className="w-8 h-8 text-yellow-500" />
             </div>
             <div className="space-y-2">
-              <h3 className="text-xl font-bold text-destructive uppercase tracking-wider">
-                Access Blocked
+              <h3 className="text-lg font-bold text-yellow-500 uppercase tracking-wider">
+                Site Protected
               </h3>
-              <p className="text-sm text-muted-foreground max-w-sm">
-                {failReason}
+              <p className="text-sm text-muted-foreground">
+                This site uses Cloudflare Turnstile which blocks proxy servers.
               </p>
             </div>
-            <div className="flex gap-3">
+            
+            {/* Alternative options */}
+            <div className="w-full space-y-2 mt-2">
+              <p className="text-xs text-muted-foreground uppercase tracking-wider">Try These Alternatives:</p>
+              
               <Button
-                variant="outline"
-                onClick={handleForceDecrypt}
-                className="border-primary/50"
-                data-testid="button-retry-force"
-              >
-                <Shield className="w-4 h-4 mr-2" />
-                Try Force Decrypt
-              </Button>
-              <Button
-                variant="secondary"
+                variant="default"
+                className="w-full"
                 onClick={() => window.open(cleanUrl, "_blank")}
-                data-testid="button-open-external"
+                data-testid="button-open-direct"
               >
                 <ExternalLink className="w-4 h-4 mr-2" />
-                Open Externally
+                Open in New Tab
+              </Button>
+              
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => {
+                  const waybackUrl = `https://web.archive.org/web/${encodeURIComponent(cleanUrl)}`;
+                  if (onUrlChange) onUrlChange(waybackUrl);
+                }}
+                data-testid="button-wayback"
+              >
+                <Terminal className="w-4 h-4 mr-2" />
+                View Archived Version
+              </Button>
+              
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => {
+                  const cacheUrl = `https://webcache.googleusercontent.com/search?q=cache:${encodeURIComponent(cleanUrl)}`;
+                  if (onUrlChange) onUrlChange(cacheUrl);
+                }}
+                data-testid="button-google-cache"
+              >
+                <Terminal className="w-4 h-4 mr-2" />
+                Google Cache
               </Button>
             </div>
+            
+            <p className="text-xs text-muted-foreground mt-2">
+              Some sites block all proxy servers. Opening in a new tab bypasses School-y but may be blocked by your network.
+            </p>
           </div>
         </div>
       )}
