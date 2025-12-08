@@ -75,22 +75,77 @@ async function fetchWithPuppeteer(targetUrl: string): Promise<{ html: string; st
     // Set realistic user agent
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     
-    // Navigate and wait for Cloudflare to pass
-    const response = await page.goto(targetUrl, {
-      waitUntil: 'networkidle2',
-      timeout: 30000
+    // Set extra headers to look more like a real browser
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
     });
     
-    // Wait a bit more for any JS challenges to complete
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // Navigate and wait for Cloudflare to pass
+    const response = await page.goto(targetUrl, {
+      waitUntil: 'domcontentloaded',
+      timeout: 45000
+    });
     
-    // Check if still on challenge page
-    const content = await page.content();
-    if (content.includes('challenge-running') || content.includes('cf-chl-widget')) {
-      // Wait longer for challenge to complete
-      console.log('[Puppeteer] Cloudflare challenge detected, waiting...');
+    // Wait for page to fully load
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    // Check for Cloudflare challenge and wait for it to complete
+    let attempts = 0;
+    const maxAttempts = 12; // Up to 60 seconds total
+    
+    while (attempts < maxAttempts) {
+      const content = await page.content();
+      
+      // Check if we're past the challenge
+      const hasChallenge = content.includes('challenge-running') || 
+                          content.includes('cf-chl-widget') ||
+                          content.includes('Verifying you are human') ||
+                          content.includes('Just a moment...') ||
+                          content.includes('Checking your browser');
+      
+      if (!hasChallenge) {
+        console.log('[Puppeteer] Challenge completed or not present');
+        break;
+      }
+      
+      console.log(`[Puppeteer] Cloudflare challenge in progress, waiting... (attempt ${attempts + 1}/${maxAttempts})`);
+      
+      // Try to click the checkbox if it exists (Turnstile)
+      try {
+        const checkbox = await page.$('input[type="checkbox"]');
+        if (checkbox) {
+          console.log('[Puppeteer] Found checkbox, clicking...');
+          await checkbox.click();
+        }
+        
+        // Also try clicking the Turnstile iframe checkbox
+        const frames = page.frames();
+        for (const frame of frames) {
+          try {
+            const turnstileCheckbox = await frame.$('#challenge-stage input');
+            if (turnstileCheckbox) {
+              console.log('[Puppeteer] Found Turnstile checkbox, clicking...');
+              await turnstileCheckbox.click();
+            }
+          } catch (e) {}
+        }
+      } catch (e) {}
+      
+      // Simulate some mouse movement to appear human
+      try {
+        await page.mouse.move(
+          100 + Math.random() * 300,
+          100 + Math.random() * 300
+        );
+      } catch (e) {}
+      
       await new Promise(resolve => setTimeout(resolve, 5000));
+      attempts++;
     }
+    
+    // Final wait and get content
+    await new Promise(resolve => setTimeout(resolve, 2000));
     
     const html = await page.content();
     const status = response?.status() || 200;
