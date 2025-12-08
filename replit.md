@@ -4,6 +4,7 @@ A powerful gaming-inspired web browser for bypassing school content filters, fea
 
 ## Features
 
+- **Password Authentication**: Universal password protection with IP-based session persistence
 - **Opera GX Gaming UI**: Dark charcoal theme with neon red/pink accents, glassmorphism effects, and bold typography
 - **Web Search**: Real-time web search with support for multiple search providers (DuckDuckGo-style centered interface)
 - **Embedded Webpage Viewer**: View websites without redirecting using advanced iframe + proxy technology
@@ -51,6 +52,15 @@ School-y supports real web search through two providers:
 
 ### Demo Mode
 Without API keys, School-y runs in demo mode with curated search results featuring popular websites. This provides a good experience for testing and development.
+
+## Authentication
+
+School-y uses a simple password-based authentication system:
+- **Universal Password**: `Unblocked123`
+- **Session Persistence**: IP-based (once authenticated, your IP is remembered)
+- **Sign In Page**: `/signin` - styled with Opera GX gaming theme
+
+Once you enter the correct password, your IP is stored and you won't need to sign in again.
 
 ## Security
 
