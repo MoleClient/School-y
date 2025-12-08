@@ -70,22 +70,22 @@ export function SearchResults({ query, onResultClick }: SearchResultsProps) {
   }
 
   return (
-    <div className="h-full overflow-auto p-4 md:p-6">
+    <div className="h-full overflow-auto p-4 md:p-6 gradient-gaming">
       <div className="max-w-5xl mx-auto">
         <p className="text-sm text-muted-foreground mb-4">
-          About {results.length} results for "{query}"
+          <span className="text-primary font-bold">{results.length}</span> results for "<span className="text-foreground">{query}</span>"
         </p>
         
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {results.map((result, index) => (
             <Card
               key={index}
-              className="p-4 hover-elevate active-elevate-2 cursor-pointer transition-all group"
+              className="p-4 hover-elevate active-elevate-2 cursor-pointer transition-all group glass border-primary/10 hover:border-primary/30"
               onClick={() => onResultClick(result)}
               data-testid={`card-result-${index}`}
             >
               <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-md bg-muted flex items-center justify-center flex-shrink-0 mt-1">
+                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0 mt-1 group-hover:bg-primary/20 transition-colors">
                   {result.favicon ? (
                     <img
                       src={result.favicon}
@@ -97,29 +97,29 @@ export function SearchResults({ query, onResultClick }: SearchResultsProps) {
                         const parent = target.parentElement;
                         if (parent) {
                           const icon = document.createElement("div");
-                          icon.innerHTML = `<svg class="w-5 h-5 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>`;
+                          icon.innerHTML = `<svg class="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>`;
                           parent.appendChild(icon.firstElementChild!);
                         }
                       }}
                     />
                   ) : (
-                    <Globe className="w-5 h-5 text-muted-foreground" />
+                    <Globe className="w-5 h-5 text-primary" />
                   )}
                 </div>
                 
                 <div className="flex-1 min-w-0">
-                  <h3 className="font-semibold text-foreground text-base mb-1 line-clamp-2 group-hover:text-primary transition-colors">
+                  <h3 className="font-bold text-foreground text-base mb-1 line-clamp-2 group-hover:text-primary transition-colors">
                     {result.title}
                   </h3>
-                  <p className="text-sm text-muted-foreground mb-2 truncate font-mono">
+                  <p className="text-xs text-primary/70 mb-2 truncate font-mono">
                     {result.url}
                   </p>
-                  <p className="text-sm text-foreground/80 line-clamp-3">
+                  <p className="text-sm text-muted-foreground line-clamp-3">
                     {result.description}
                   </p>
                 </div>
 
-                <ExternalLink className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 mt-1" />
+                <ExternalLink className="w-4 h-4 text-primary opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 mt-1" />
               </div>
             </Card>
           ))}

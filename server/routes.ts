@@ -616,7 +616,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Obfuscated resource endpoint - for XHR/fetch requests
+  // Obfuscated resource endpoint - for XHR/fetch requests with streaming support
   app.all("/api/r", async (req, res) => {
     try {
       const targetUrl = req.query.u as string;
@@ -635,14 +635,112 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).send("Invalid protocol");
       }
 
-      const response = await fetchWithRetry(targetUrl, 0);
+      // Build headers to forward (Range for video streaming, Accept for SSE)
+      const forwardHeaders: Record<string, string> = {
+        'User-Agent': userAgents[0],
+        'Accept': req.headers.accept || '*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'identity', // Don't request compression for streaming
+      };
+
+      // Forward Range header for video streaming (YouTube, etc.)
+      if (req.headers.range) {
+        forwardHeaders['Range'] = req.headers.range;
+      }
+
+      // Forward content-type for POST requests
+      if (req.headers['content-type']) {
+        forwardHeaders['Content-Type'] = req.headers['content-type'];
+      }
+
+      // Check if this is an SSE request
+      const isSSE = req.headers.accept?.includes('text/event-stream');
+      
+      const fetchOptions: RequestInit = {
+        method: req.method,
+        headers: forwardHeaders,
+      };
+
+      // Forward body for POST/PUT/PATCH
+      if (['POST', 'PUT', 'PATCH'].includes(req.method) && req.body) {
+        if (typeof req.body === 'object') {
+          fetchOptions.body = JSON.stringify(req.body);
+        } else {
+          fetchOptions.body = req.body;
+        }
+      }
+
+      const response = await fetch(targetUrl, fetchOptions);
       const contentType = response.headers.get('content-type') || 'application/octet-stream';
       
-      res.setHeader('Content-Type', contentType);
+      // Set CORS headers
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', '*');
+      res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length');
       
+      // Forward important headers
+      res.setHeader('Content-Type', contentType);
+      
+      // Forward Range response headers for video streaming
+      const contentRange = response.headers.get('content-range');
+      const acceptRanges = response.headers.get('accept-ranges');
+      const contentLength = response.headers.get('content-length');
+      
+      if (contentRange) res.setHeader('Content-Range', contentRange);
+      if (acceptRanges) res.setHeader('Accept-Ranges', acceptRanges);
+      if (contentLength) res.setHeader('Content-Length', contentLength);
+
+      // Use appropriate status code (206 for partial content)
+      res.status(response.status);
+
+      // Handle SSE streaming
+      if (isSSE && response.body) {
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        
+        const pump = async () => {
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              res.write(decoder.decode(value, { stream: true }));
+            }
+            res.end();
+          } catch (e) {
+            res.end();
+          }
+        };
+        
+        pump();
+        return;
+      }
+
+      // Stream response for large files (video, audio)
+      if (response.body && (contentType.includes('video') || contentType.includes('audio') || contentRange)) {
+        const reader = response.body.getReader();
+        
+        const pump = async () => {
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              res.write(Buffer.from(value));
+            }
+            res.end();
+          } catch (e) {
+            res.end();
+          }
+        };
+        
+        pump();
+        return;
+      }
+      
+      // Standard response for other content
       const buffer = await response.arrayBuffer();
       res.send(Buffer.from(buffer));
     } catch (error) {

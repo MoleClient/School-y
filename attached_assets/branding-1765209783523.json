@@ -1,0 +1,141 @@
+{
+  "colorScheme": "light",
+  "fonts": [
+    {
+      "family": "Proxima Nova",
+      "role": "body"
+    },
+    {
+      "family": "Helvetica Neue",
+      "role": "body"
+    },
+    {
+      "family": "Helvetica",
+      "role": "body"
+    },
+    {
+      "family": "Segoe UI",
+      "role": "body"
+    },
+    {
+      "family": "Open Sans",
+      "role": "body"
+    }
+  ],
+  "colors": {
+    "primary": "#353748",
+    "accent": "#3969EF",
+    "background": "#FAFAFA",
+    "textPrimary": "#000000",
+    "link": "#3969EF"
+  },
+  "typography": {
+    "fontFamilies": {
+      "primary": "Proxima Nova",
+      "heading": "Proxima Nova"
+    },
+    "fontStacks": {
+      "heading": [
+        "Proxima Nova",
+        "Helvetica Neue",
+        "Helvetica",
+        "Segoe UI",
+        "Nimbus Sans L",
+        "Liberation Sans",
+        "Open Sans",
+        "FreeSans",
+        "Arial",
+        "sans-serif"
+      ],
+      "body": [
+        "Proxima Nova",
+        "Helvetica Neue",
+        "Helvetica",
+        "Segoe UI",
+        "Nimbus Sans L",
+        "Liberation Sans",
+        "Open Sans",
+        "FreeSans",
+        "Arial",
+        "sans-serif"
+      ],
+      "paragraph": [
+        "Proxima Nova",
+        "Helvetica Neue",
+        "Helvetica",
+        "Segoe UI",
+        "Nimbus Sans L",
+        "Liberation Sans",
+        "Open Sans",
+        "FreeSans",
+        "Arial",
+        "sans-serif"
+      ]
+    },
+    "fontSizes": {
+      "h1": "64px",
+      "h2": "48px",
+      "body": "16px"
+    }
+  },
+  "spacing": {
+    "baseUnit": 4,
+    "borderRadius": "0px"
+  },
+  "components": {
+    "input": {
+      "borderColor": "#CCCCCC",
+      "borderRadius": "0px"
+    },
+    "buttonPrimary": {
+      "background": "#3969EF",
+      "textColor": "#FFFFFF",
+      "borderRadius": "16px",
+      "shadow": "none"
+    },
+    "buttonSecondary": {
+      "background": "#EBEBEB",
+      "textColor": "#222222",
+      "borderRadius": "12px",
+      "shadow": "none"
+    }
+  },
+  "images": {
+    "logo": "File saved at: attached_assets/logo.svg",
+    "favicon": "https://duckduckgo.com/favicon.ico",
+    "ogImage": "https://duckduckgo.com/assets/logo_social-media.png"
+  },
+  "__framework_hints": [],
+  "__llm_logo_reasoning": {
+    "selectedIndex": 0,
+    "reasoning": "Logo #0 is a visible SVG in the header that matches the brand name 'DuckDuckGo', making it the best candidate for the brand logo.",
+    "confidence": 0.95
+  },
+  "__llm_button_reasoning": {
+    "primary": {
+      "index": 0,
+      "text": "Set As Your Browser’s Search Engine",
+      "reasoning": "Button #0 has a vibrant blue background (#3969EF), which is the brand color, and action-oriented text 'Set As Your Browser’s Search Engine'. This makes it the primary call-to-action button."
+    },
+    "secondary": {
+      "index": 1,
+      "text": "Set As Default Search",
+      "reasoning": "Button #1 has a light gray background (#EBEBEB) and is less prominent compared to the primary button. It serves as a secondary action with the text 'Set As Default Search'."
+    },
+    "confidence": 0.95
+  },
+  "personality": {
+    "tone": "professional",
+    "energy": "medium",
+    "targetAudience": "privacy-conscious internet users"
+  },
+  "designSystem": {
+    "framework": "unknown",
+    "componentLibrary": null
+  },
+  "confidence": {
+    "buttons": 0.95,
+    "colors": 0.9,
+    "overall": 0.925
+  }
+}

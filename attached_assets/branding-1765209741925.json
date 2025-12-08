@@ -1,0 +1,119 @@
+{
+  "colorScheme": "dark",
+  "fonts": [
+    {
+      "family": "Roboto",
+      "role": "body"
+    },
+    {
+      "family": "Inter",
+      "role": "body"
+    },
+    {
+      "family": "Underwave",
+      "role": "display"
+    },
+    {
+      "family": "Arial",
+      "role": "body"
+    },
+    {
+      "family": "sans-serif",
+      "role": "body"
+    }
+  ],
+  "colors": {
+    "primary": "#BDB8D1",
+    "accent": "#FA1E4E",
+    "background": "#121019",
+    "textPrimary": "#121019",
+    "link": "#8A80AC"
+  },
+  "typography": {
+    "fontFamilies": {
+      "primary": "Roboto",
+      "heading": "Underwave"
+    },
+    "fontStacks": {
+      "heading": [
+        "Underwave",
+        "sans-serif"
+      ],
+      "body": [
+        "Inter",
+        "Roboto",
+        "sans-serif"
+      ],
+      "paragraph": [
+        "Inter",
+        "Roboto",
+        "sans-serif"
+      ]
+    },
+    "fontSizes": {
+      "h1": "78.7046px",
+      "h2": "44.9741px",
+      "body": "25.2979px"
+    }
+  },
+  "spacing": {
+    "baseUnit": 8,
+    "borderRadius": "0px"
+  },
+  "components": {
+    "input": {
+      "borderColor": "#CCCCCC",
+      "borderRadius": "0px"
+    },
+    "buttonPrimary": {
+      "background": "#FA1E4E",
+      "textColor": "#000000",
+      "borderRadius": "2.81088px",
+      "shadow": "none"
+    },
+    "buttonSecondary": {
+      "background": "#121019",
+      "textColor": "#000000",
+      "borderRadius": "0px",
+      "shadow": "none"
+    }
+  },
+  "images": {
+    "logo": "File saved at: attached_assets/logo.svg",
+    "favicon": "https://cdn-production-opera-website.operacdn.com/staticfiles/assets/gx/images/welcomeGx/favicon/apple-touch-icon.16b2fb5b1ecc.png",
+    "ogImage": "https://cdn-production-opera-website.operacdn.com/staticfiles/assets/images/og/og-opera-lp-opera-gx.4c628195330d.png\n\n"
+  },
+  "__framework_hints": [],
+  "__llm_logo_reasoning": {
+    "selectedIndex": 0,
+    "reasoning": "Logo #0 matches the brand name 'Opera GX' and is located in the header, linking to the homepage, making it the most suitable choice for the brand logo.",
+    "confidence": 0.9
+  },
+  "__llm_button_reasoning": {
+    "primary": {
+      "index": 2,
+      "text": "Download now",
+      "reasoning": "Button #2 ('Download now') has a vibrant red/orange background (#FA1E4E), which is a strong indicator of a primary CTA. The text is action-oriented, making it the main call-to-action."
+    },
+    "secondary": {
+      "index": 0,
+      "text": "Discover more features",
+      "reasoning": "Button #0 ('Discover more features') has a dark background (#121019), which is distinctly different from the primary button's vibrant color. It serves as a secondary action, inviting users to explore more features without being as prominent as the primary CTA."
+    },
+    "confidence": 0.95
+  },
+  "personality": {
+    "tone": "modern",
+    "energy": "high",
+    "targetAudience": "tech-savvy users, gamers"
+  },
+  "designSystem": {
+    "framework": "custom",
+    "componentLibrary": null
+  },
+  "confidence": {
+    "buttons": 0.95,
+    "colors": 0.9,
+    "overall": 0.925
+  }
+}
