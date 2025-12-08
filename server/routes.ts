@@ -4,6 +4,85 @@ import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
 import { searchResultSchema } from "@shared/schema";
 import { z } from "zod";
+import puppeteer from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+
+// Configure Puppeteer with stealth plugin to bypass bot detection
+puppeteer.use(StealthPlugin());
+
+// Shared browser instance for efficiency
+let browserInstance: any = null;
+let browserLastUsed = 0;
+const BROWSER_TIMEOUT = 5 * 60 * 1000; // Close browser after 5 min of inactivity
+
+async function getBrowser() {
+  const now = Date.now();
+  if (browserInstance && now - browserLastUsed < BROWSER_TIMEOUT) {
+    browserLastUsed = now;
+    return browserInstance;
+  }
+  
+  if (browserInstance) {
+    try { await browserInstance.close(); } catch (e) {}
+  }
+  
+  console.log('Launching stealth browser...');
+  browserInstance = await puppeteer.launch({
+    headless: true,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--disable-gpu',
+      '--window-size=1920,1080',
+      '--disable-blink-features=AutomationControlled',
+    ]
+  });
+  browserLastUsed = now;
+  return browserInstance;
+}
+
+// Puppeteer-based fetch for Cloudflare-protected sites
+async function fetchWithPuppeteer(targetUrl: string): Promise<{ html: string; status: number }> {
+  console.log(`[Puppeteer] Fetching ${targetUrl} with stealth browser...`);
+  
+  const browser = await getBrowser();
+  const page = await browser.newPage();
+  
+  try {
+    // Set realistic viewport
+    await page.setViewport({ width: 1920, height: 1080 });
+    
+    // Set realistic user agent
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    
+    // Navigate and wait for Cloudflare to pass
+    const response = await page.goto(targetUrl, {
+      waitUntil: 'networkidle2',
+      timeout: 30000
+    });
+    
+    // Wait a bit more for any JS challenges to complete
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // Check if still on challenge page
+    const content = await page.content();
+    if (content.includes('challenge-running') || content.includes('cf-chl-widget')) {
+      // Wait longer for challenge to complete
+      console.log('[Puppeteer] Cloudflare challenge detected, waiting...');
+      await new Promise(resolve => setTimeout(resolve, 5000));
+    }
+    
+    const html = await page.content();
+    const status = response?.status() || 200;
+    
+    console.log(`[Puppeteer] Got ${html.length} bytes, status ${status}`);
+    return { html, status };
+  } finally {
+    await page.close();
+  }
+}
 
 // URL obfuscation to bypass content filters
 // Uses a simple XOR + base64 encoding to hide domain names from DPI
@@ -269,24 +348,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       let response: Response | null = null;
       let html = '';
+      let contentType = 'text/html';
+      let usedPuppeteer = false;
       
-      for (let attempt = 0; attempt < 3; attempt++) {
+      // First try regular fetch
+      for (let attempt = 0; attempt < 2; attempt++) {
         try {
           response = await fetchWithRetry(targetUrl, attempt);
           const buffer = await response.arrayBuffer();
           html = new TextDecoder('utf-8').decode(buffer);
+          contentType = response.headers.get('content-type') || 'text/html';
           
-          if (!isBlockPage(html)) break;
+          // Check if we got blocked (403) or Cloudflare challenge
+          if (response.status === 403 || 
+              html.includes('cf-chl-widget') || 
+              html.includes('challenge-running') ||
+              html.includes('Just a moment...') ||
+              html.includes('Checking your browser')) {
+            console.log(`[Proxy] Cloudflare detected on ${targetUrl}, trying Puppeteer fallback...`);
+            break; // Exit loop to try Puppeteer
+          }
+          
+          if (!isBlockPage(html)) {
+            break; // Success, exit loop
+          }
         } catch (error) {
-          if (attempt === 2) throw error;
+          if (attempt === 1) {
+            console.log(`[Proxy] Regular fetch failed, trying Puppeteer...`);
+          }
+        }
+      }
+      
+      // If blocked or failed, try Puppeteer stealth browser
+      if (!response || response.status === 403 || 
+          html.includes('cf-chl-widget') || 
+          html.includes('challenge-running') ||
+          html.includes('Just a moment...')) {
+        try {
+          const puppeteerResult = await fetchWithPuppeteer(targetUrl);
+          html = puppeteerResult.html;
+          usedPuppeteer = true;
+          contentType = 'text/html';
+          console.log(`[Proxy] Puppeteer succeeded for ${targetUrl}`);
+        } catch (puppeteerError) {
+          console.error(`[Proxy] Puppeteer also failed:`, puppeteerError);
+          if (!response) {
+            return res.status(500).send("Failed to fetch - site may be blocking proxy access");
+          }
         }
       }
 
-      if (!response) {
+      if (!response && !usedPuppeteer) {
         return res.status(500).send("Failed to fetch");
       }
-
-      const contentType = response.headers.get('content-type') || 'text/html';
       
       if (!contentType.includes('text/html')) {
         res.setHeader('Content-Type', contentType);
