@@ -39,7 +39,7 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
   // Use path-based proxy for better SPA support - no cache busting params needed
   const proxyUrl = cleanUrl ? toProxyPath(cleanUrl) : "";
 
-  // Listen for navigation messages from the iframe
+  // Listen for navigation and download messages from the iframe
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (event.data && event.data.type === 'navigation' && event.data.url) {
@@ -48,6 +48,18 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
         if (newUrl && newUrl !== cleanUrl && onUrlChange) {
           onUrlChange(newUrl);
         }
+      }
+      
+      // Handle download requests from iframe
+      if (event.data && event.data.type === 'download' && event.data.url) {
+        // Trigger download by creating a temporary link
+        const link = document.createElement('a');
+        link.href = event.data.url;
+        link.download = event.data.filename || '';
+        link.target = '_blank';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
       }
     };
 

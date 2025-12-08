@@ -446,12 +446,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
     notifyParent(location.pathname);
   });
   
+  // Helper to check if URL is a download
+  function isDownloadUrl(url) {
+    if (!url) return false;
+    var ext = url.split('?')[0].split('#')[0].split('.').pop().toLowerCase();
+    var downloadExts = ['zip', 'rar', '7z', 'tar', 'gz', 'exe', 'msi', 'dmg', 'pkg', 'deb', 'rpm', 'apk', 'ipa', 
+      'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp',
+      'mp3', 'mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'webm', 'm4v', 'wav', 'flac', 'aac', 'ogg',
+      'iso', 'img', 'bin', 'jar', 'war', 'ear'];
+    return downloadExts.includes(ext);
+  }
+  
+  // Handle download by opening in parent window
+  function triggerDownload(url, filename) {
+    var abs = url;
+    if (url.startsWith('//')) abs = 'https:' + url;
+    else if (url.startsWith('/')) abs = B + url;
+    else if (!url.match(/^https?:\\/\\//)) abs = B + '/' + url;
+    
+    var downloadUrl = '/api/download?u=' + encodeURIComponent(abs);
+    if (filename) downloadUrl += '&f=' + encodeURIComponent(filename);
+    
+    // Notify parent to trigger download
+    if (window.parent && window.parent !== window) {
+      try {
+        window.parent.postMessage({ type: 'download', url: downloadUrl, filename: filename || '' }, '*');
+      } catch(e) {}
+    }
+    // Also open directly (works if not in iframe or parent handles it)
+    window.open(downloadUrl, '_blank');
+  }
+  
   // Click handler - catch all link clicks including target=_blank
   document.addEventListener('click', function(e) {
     var link = e.target && e.target.closest ? e.target.closest('a[href]') : null;
     if (!link) return;
     var href = link.getAttribute('href');
     if (!href || href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('/b/')) return;
+    
+    // Check if this is a download link
+    var hasDownloadAttr = link.hasAttribute('download');
+    var downloadFilename = link.getAttribute('download') || '';
+    var isDownload = hasDownloadAttr || isDownloadUrl(href);
+    
+    if (isDownload) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      triggerDownload(href, downloadFilename);
+      return false;
+    }
     
     e.preventDefault();
     e.stopPropagation();
@@ -698,7 +742,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', '*');
-      res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length');
+      res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length, Content-Disposition');
       
       // Forward important headers
       res.setHeader('Content-Type', contentType);
@@ -707,10 +751,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const contentRange = response.headers.get('content-range');
       const acceptRanges = response.headers.get('accept-ranges');
       const contentLength = response.headers.get('content-length');
+      const contentDisposition = response.headers.get('content-disposition');
       
       if (contentRange) res.setHeader('Content-Range', contentRange);
       if (acceptRanges) res.setHeader('Accept-Ranges', acceptRanges);
       if (contentLength) res.setHeader('Content-Length', contentLength);
+      if (contentDisposition) res.setHeader('Content-Disposition', contentDisposition);
 
       // Use appropriate status code (206 for partial content)
       res.status(response.status);
@@ -767,6 +813,90 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Resource proxy error:", error);
       res.status(500).send("Error");
+    }
+  });
+
+  // Download endpoint - forces file download with proper headers
+  app.get("/api/download", async (req, res) => {
+    try {
+      const targetUrl = req.query.u as string;
+      const filename = req.query.f as string;
+      
+      if (!targetUrl) {
+        return res.status(400).send("Missing URL");
+      }
+
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(targetUrl);
+      } catch (e) {
+        return res.status(400).send("Invalid URL");
+      }
+
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        return res.status(400).send("Invalid protocol");
+      }
+
+      if (isPrivateOrLocalAddress(parsedUrl.hostname)) {
+        return res.status(403).send("Not allowed");
+      }
+
+      const response = await fetch(targetUrl, {
+        headers: {
+          'User-Agent': userAgents[0],
+          'Accept': '*/*',
+        },
+      });
+
+      if (!response.ok) {
+        return res.status(response.status).send("Download failed");
+      }
+
+      const contentType = response.headers.get('content-type') || 'application/octet-stream';
+      const contentLength = response.headers.get('content-length');
+      let contentDisposition = response.headers.get('content-disposition');
+      
+      // Extract filename from Content-Disposition or URL
+      let downloadFilename = filename;
+      if (!downloadFilename && contentDisposition) {
+        const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        if (match) {
+          downloadFilename = match[1].replace(/['"]/g, '');
+        }
+      }
+      if (!downloadFilename) {
+        downloadFilename = parsedUrl.pathname.split('/').pop() || 'download';
+      }
+
+      // Set headers for download
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Disposition', `attachment; filename="${downloadFilename}"`);
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      if (contentLength) res.setHeader('Content-Length', contentLength);
+
+      // Stream the file
+      if (response.body) {
+        const reader = response.body.getReader();
+        const pump = async () => {
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              res.write(Buffer.from(value));
+            }
+            res.end();
+          } catch (e) {
+            res.end();
+          }
+        };
+        pump();
+      } else {
+        const buffer = await response.arrayBuffer();
+        res.send(Buffer.from(buffer));
+      }
+    } catch (error) {
+      console.error("Download error:", error);
+      res.status(500).send("Download failed");
     }
   });
 
