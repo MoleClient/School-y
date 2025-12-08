@@ -1,6 +1,40 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Loader2, ExternalLink, RefreshCw } from "lucide-react";
+import { ExternalLink, RefreshCw, Shield, Lock, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
+
+// Hacker-style loading messages
+const DECRYPT_MESSAGES = [
+  "Initializing secure tunnel...",
+  "Bypassing content filters...",
+  "Decrypting connection...",
+  "Spoofing browser fingerprint...",
+  "Establishing proxy route...",
+  "Injecting stealth headers...",
+  "Circumventing firewall...",
+  "Masking origin server...",
+  "Negotiating TLS handshake...",
+  "Rendering protected content...",
+  "Extracting page data...",
+  "Reassembling packets...",
+];
+
+// Generate random hex string
+function randomHex(length: number): string {
+  return Array.from({ length }, () => 
+    Math.floor(Math.random() * 16).toString(16)
+  ).join('');
+}
+
+// Scramble text effect
+function scrambleText(text: string, progress: number): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+  const revealed = Math.floor(text.length * progress);
+  return text.split('').map((char, i) => {
+    if (i < revealed) return char;
+    if (char === ' ' || char === '.' || char === '/') return char;
+    return chars[Math.floor(Math.random() * chars.length)];
+  }).join('');
+}
 
 interface WebpageViewerProps {
   url: string;
@@ -213,24 +247,103 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
     );
   }
 
+  // Animated decrypt message
+  const [decryptMsg, setDecryptMsg] = useState(DECRYPT_MESSAGES[0]);
+  const [hexData, setHexData] = useState(randomHex(32));
+  const [scrambledUrl, setScrambledUrl] = useState('');
+  
+  useEffect(() => {
+    if (!isLoading) return;
+    
+    // Rotate through decrypt messages
+    const msgInterval = setInterval(() => {
+      setDecryptMsg(DECRYPT_MESSAGES[Math.floor(Math.random() * DECRYPT_MESSAGES.length)]);
+    }, 2000);
+    
+    // Animate hex data
+    const hexInterval = setInterval(() => {
+      setHexData(randomHex(32));
+    }, 100);
+    
+    // Scramble URL reveal effect
+    const urlInterval = setInterval(() => {
+      const progress = Math.min(loadProgress / 100, 1);
+      setScrambledUrl(scrambleText(cleanUrl || '', progress));
+    }, 50);
+    
+    return () => {
+      clearInterval(msgInterval);
+      clearInterval(hexInterval);
+      clearInterval(urlInterval);
+    };
+  }, [isLoading, loadProgress, cleanUrl]);
+
   return (
     <div className="relative w-full h-full bg-white dark:bg-gray-900">
-      {/* Loading overlay with progress bar */}
+      {/* Hacker-style loading overlay */}
       {isLoading && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-background z-10">
-          <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
-            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-background z-10 overflow-hidden">
+          {/* Matrix-style background effect */}
+          <div className="absolute inset-0 opacity-5 pointer-events-none overflow-hidden">
+            <div className="font-mono text-xs text-primary whitespace-pre leading-tight animate-pulse">
+              {Array.from({ length: 20 }, () => randomHex(80)).join('\n')}
+            </div>
           </div>
-          <div className="text-center">
-            <p className="font-medium text-foreground">Loading webpage...</p>
-            <p className="text-sm text-muted-foreground mt-1 max-w-xs truncate">{cleanUrl}</p>
-          </div>
-          {/* Progress bar */}
-          <div className="w-48 h-1 bg-muted rounded-full overflow-hidden">
-            <div 
-              className="h-full bg-primary transition-all duration-150 ease-out"
-              style={{ width: `${loadProgress}%` }}
-            />
+          
+          {/* Main content */}
+          <div className="relative z-10 flex flex-col items-center gap-6 p-8">
+            {/* Shield icon with pulse effect */}
+            <div className="relative">
+              <div className="absolute inset-0 bg-primary/20 rounded-full animate-ping" />
+              <div className="relative w-20 h-20 rounded-full bg-primary/10 border-2 border-primary/30 flex items-center justify-center">
+                <Shield className="w-10 h-10 text-primary animate-pulse" />
+              </div>
+            </div>
+            
+            {/* Status text */}
+            <div className="text-center space-y-2">
+              <div className="flex items-center gap-2 justify-center">
+                <Lock className="w-4 h-4 text-primary" />
+                <span className="text-lg font-bold text-primary uppercase tracking-wider">
+                  Decrypting
+                </span>
+              </div>
+              <p className="font-mono text-sm text-muted-foreground animate-pulse">
+                {decryptMsg}
+              </p>
+            </div>
+            
+            {/* URL with scramble effect */}
+            <div className="bg-black/50 border border-primary/30 rounded-lg p-3 max-w-md w-full">
+              <div className="flex items-center gap-2 mb-2">
+                <Terminal className="w-4 h-4 text-primary" />
+                <span className="text-xs text-primary/70 font-mono uppercase">Target URL</span>
+              </div>
+              <p className="font-mono text-xs text-green-400 break-all">
+                {scrambledUrl || cleanUrl}
+              </p>
+            </div>
+            
+            {/* Hex data stream */}
+            <div className="font-mono text-xs text-primary/40 tracking-wider">
+              0x{hexData}
+            </div>
+            
+            {/* Progress bar */}
+            <div className="w-64 space-y-2">
+              <div className="flex justify-between text-xs font-mono text-muted-foreground">
+                <span>Progress</span>
+                <span>{Math.round(loadProgress)}%</span>
+              </div>
+              <div className="h-2 bg-black/50 rounded-full overflow-hidden border border-primary/20">
+                <div 
+                  className="h-full bg-gradient-to-r from-primary via-primary to-primary/50 transition-all duration-150 ease-out relative"
+                  style={{ width: `${loadProgress}%` }}
+                >
+                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-pulse" />
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
