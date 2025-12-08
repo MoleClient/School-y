@@ -1,26 +1,35 @@
-# School-y - Safari-Styled Web Browser Platform
+# School-y - Opera GX-Inspired Web Browser Platform
 
-A beautiful Safari-inspired web browser that allows users to search the web and view websites embedded within the platform without leaving the page.
+A powerful gaming-inspired web browser for bypassing school content filters, featuring Opera GX aesthetics with neon accents on a dark theme.
 
 ## Features
 
-- **Safari-Styled UI**: Authentic Safari browser chrome with traffic lights, address bar, and navigation controls
-- **Web Search**: Real-time web search with support for multiple search providers
-- **Embedded Webpage Viewer**: View websites without redirecting to new tabs using iframe technology
-- **URL Synchronization**: Address bar updates in real-time as you click links within pages (shows full paths like `www.website.com/article/name`)
+- **Opera GX Gaming UI**: Dark charcoal theme with neon red/pink accents, glassmorphism effects, and bold typography
+- **Web Search**: Real-time web search with support for multiple search providers (DuckDuckGo-style centered interface)
+- **Embedded Webpage Viewer**: View websites without redirecting using advanced iframe + proxy technology
+- **URL Synchronization**: Address bar updates in real-time as you click links within pages
 - **Navigation Controls**: Full browser history with back, forward, and reload functionality
 - **URL Obfuscation**: Domain names are XOR-encoded and base64-encoded to evade content filter detection
+- **Video Streaming**: Range header support for YouTube and other video sites with chunked transfer
 - **Real-time Support**: WebSocket tunneling and SSE proxy for chat apps, live updates, and streaming content
 - **Asset Caching**: In-memory caching for static assets (JS, CSS, fonts, images) with ETag support
-- **Responsive Design**: Works beautifully on desktop, tablet, and mobile devices
+- **Responsive Design**: Works on desktop, tablet, and mobile devices
+
+## Design Theme
+
+The application uses an Opera GX-inspired gaming aesthetic:
+- **Primary Color**: Neon Red/Pink `hsl(345, 95%, 55%)` / `#FA1E4E`
+- **Background**: Deep Charcoal `hsl(270, 20%, 6%)` / `#121019`
+- **Effects**: Glassmorphism, neon glow, gradient backgrounds
+- **Typography**: Bold, uppercase section headers with tracking
 
 ## Architecture
 
 ### Frontend
 - React SPA with Wouter routing
-- Shadcn UI components for polished, accessible interface
+- Shadcn UI components with Opera GX custom styling
 - TanStack Query for data fetching and caching
-- Tailwind CSS with custom Safari-inspired design tokens
+- Tailwind CSS with gaming-inspired design tokens (glassmorphism, neon-glow utilities)
 
 ### Backend
 - Express.js server
