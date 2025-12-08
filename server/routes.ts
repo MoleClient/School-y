@@ -6,6 +6,7 @@ import { searchResultSchema } from "@shared/schema";
 import { z } from "zod";
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import { execSync } from 'child_process';
 
 // Configure Puppeteer with stealth plugin to bypass bot detection
 puppeteer.use(StealthPlugin());
@@ -27,8 +28,23 @@ async function getBrowser() {
   }
   
   console.log('Launching stealth browser...');
+  
+  // Find system chromium - use the Nix store path
+  let chromiumPath = 'chromium';
+  try {
+    chromiumPath = execSync('which chromium').toString().trim();
+  } catch (e) {
+    // fallback to search
+    try {
+      const found = execSync('find /nix/store -name "chromium" -type f -path "*/bin/*" 2>/dev/null | head -1').toString().trim();
+      if (found) chromiumPath = found;
+    } catch (e2) {}
+  }
+  console.log('Using chromium at:', chromiumPath);
+  
   browserInstance = await puppeteer.launch({
     headless: true,
+    executablePath: chromiumPath,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -37,6 +53,8 @@ async function getBrowser() {
       '--disable-gpu',
       '--window-size=1920,1080',
       '--disable-blink-features=AutomationControlled',
+      '--single-process', // Required for some environments
+      '--no-zygote',
     ]
   });
   browserLastUsed = now;
