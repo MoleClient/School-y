@@ -464,7 +464,7 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
       {/* Failed to load overlay */}
       {loadFailed && !isLoading && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/95 z-10 overflow-auto">
-          <div className="flex flex-col items-center gap-4 p-6 text-center max-w-md">
+          <div className="flex flex-col items-center gap-4 p-6 text-center max-w-lg">
             <div className="w-16 h-16 rounded-full bg-yellow-500/10 border-2 border-yellow-500/30 flex items-center justify-center">
               <Shield className="w-8 h-8 text-yellow-500" />
             </div>
@@ -473,54 +473,59 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
                 Site Protected
               </h3>
               <p className="text-sm text-muted-foreground">
-                This site uses Cloudflare Turnstile which blocks proxy servers.
+                This site blocks proxy servers. Try these alternatives:
               </p>
             </div>
             
-            {/* Alternative options */}
-            <div className="w-full space-y-2 mt-2">
-              <p className="text-xs text-muted-foreground uppercase tracking-wider">Try These Alternatives:</p>
-              
-              <Button
-                variant="default"
-                className="w-full"
-                onClick={() => window.open(cleanUrl, "_blank")}
-                data-testid="button-open-direct"
-              >
-                <ExternalLink className="w-4 h-4 mr-2" />
-                Open in New Tab
-              </Button>
-              
+            {/* Action buttons in a row */}
+            <div className="flex flex-wrap justify-center gap-2 mt-2">
               <Button
                 variant="outline"
-                className="w-full"
+                size="sm"
+                onClick={handleForceDecrypt}
+                className="border-primary/50 text-primary hover:bg-primary/20"
+                data-testid="button-bypass-failed"
+              >
+                <Skull className="w-4 h-4 mr-1" />
+                Bypass
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => {
-                  const waybackUrl = `https://web.archive.org/web/${encodeURIComponent(cleanUrl)}`;
+                  const waybackUrl = `https://web.archive.org/web/${cleanUrl}`;
                   if (onUrlChange) onUrlChange(waybackUrl);
                 }}
-                data-testid="button-wayback"
+                className="border-blue-500/50 text-blue-400 hover:bg-blue-500/20"
+                data-testid="button-wayback-failed"
               >
-                <Terminal className="w-4 h-4 mr-2" />
-                View Archived Version
+                <Archive className="w-4 h-4 mr-1" />
+                Wayback
               </Button>
-              
               <Button
                 variant="outline"
-                className="w-full"
+                size="sm"
                 onClick={() => {
                   const cacheUrl = `https://webcache.googleusercontent.com/search?q=cache:${encodeURIComponent(cleanUrl)}`;
                   if (onUrlChange) onUrlChange(cacheUrl);
                 }}
-                data-testid="button-google-cache"
+                className="border-green-500/50 text-green-400 hover:bg-green-500/20"
+                data-testid="button-google-cache-failed"
               >
-                <Terminal className="w-4 h-4 mr-2" />
+                <Globe className="w-4 h-4 mr-1" />
                 Google Cache
               </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.open(cleanUrl, "_blank")}
+                className="border-orange-500/50 text-orange-400 hover:bg-orange-500/20"
+                data-testid="button-new-tab-failed"
+              >
+                <ExternalLink className="w-4 h-4 mr-1" />
+                New Tab
+              </Button>
             </div>
-            
-            <p className="text-xs text-muted-foreground mt-2">
-              Some sites block all proxy servers. Opening in a new tab bypasses School-y but may be blocked by your network.
-            </p>
           </div>
         </div>
       )}
