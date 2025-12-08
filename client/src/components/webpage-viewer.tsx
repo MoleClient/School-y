@@ -10,6 +10,57 @@ interface WebpageViewerProps {
 // XOR key for URL obfuscation (must match server)
 const OBFUSCATION_KEY = 0x5A;
 
+// Cloudflare and tracking parameters to strip from URLs
+const SPAM_PARAMS = [
+  '__cf_chl_rt_tk',
+  '__cf_chl_tk',
+  '__cf_chl_jschl_tk',
+  '__cf_chl_captcha_tk',
+  '__cflb',
+  'cf_chl_opt',
+  '_ga',
+  '_gl',
+  'utm_source',
+  'utm_medium',
+  'utm_campaign',
+  'utm_content',
+  'utm_term',
+  'fbclid',
+  'gclid',
+  'msclkid',
+];
+
+// Clean URL by removing Cloudflare challenge and tracking parameters
+function cleanUrlParams(url: string): string {
+  try {
+    const urlObj = new URL(url);
+    let changed = false;
+    
+    for (const param of SPAM_PARAMS) {
+      if (urlObj.searchParams.has(param)) {
+        urlObj.searchParams.delete(param);
+        changed = true;
+      }
+    }
+    
+    // Also remove any parameter starting with __cf
+    const keysToDelete: string[] = [];
+    urlObj.searchParams.forEach((_, key) => {
+      if (key.startsWith('__cf')) {
+        keysToDelete.push(key);
+      }
+    });
+    keysToDelete.forEach(key => {
+      urlObj.searchParams.delete(key);
+      changed = true;
+    });
+    
+    return changed ? urlObj.toString() : url;
+  } catch {
+    return url;
+  }
+}
+
 // Obfuscate URL to hide domain names from content filters
 function obfuscateUrl(url: string): string {
   const fullUrl = url.startsWith('http') ? url : `https://${url}`;
@@ -43,8 +94,9 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (event.data && event.data.type === 'navigation' && event.data.url) {
-        const newUrl = event.data.url;
-        // Only notify if the URL actually changed
+        // Clean Cloudflare challenge and tracking params from the URL
+        const newUrl = cleanUrlParams(event.data.url);
+        // Only notify if the URL actually changed (after cleaning)
         if (newUrl && newUrl !== cleanUrl && onUrlChange) {
           onUrlChange(newUrl);
         }
