@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { ExternalLink, RefreshCw, Shield, Lock, Terminal } from "lucide-react";
+import { ExternalLink, RefreshCw, Shield, Lock, Terminal, Skull, Archive, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 // Hacker-style loading messages
@@ -397,17 +397,58 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
               </div>
             </div>
             
-            {/* Force Decrypt button - show after some loading time */}
-            {loadProgress > 30 && !forceMode && (
-              <Button
-                variant="outline"
-                onClick={handleForceDecrypt}
-                className="border-primary/50 text-primary hover:bg-primary/20"
-                data-testid="button-force-decrypt"
-              >
-                <Shield className="w-4 h-4 mr-2" />
-                Force Decrypt
-              </Button>
+            {/* Action buttons - show after some loading time */}
+            {loadProgress > 30 && (
+              <div className="flex flex-wrap justify-center gap-2">
+                {!forceMode && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleForceDecrypt}
+                    className="border-primary/50 text-primary hover:bg-primary/20"
+                    data-testid="button-bypass"
+                  >
+                    <Skull className="w-4 h-4 mr-1" />
+                    Bypass
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const waybackUrl = `https://web.archive.org/web/${cleanUrl}`;
+                    if (onUrlChange) onUrlChange(waybackUrl);
+                  }}
+                  className="border-blue-500/50 text-blue-400 hover:bg-blue-500/20"
+                  data-testid="button-wayback-loading"
+                >
+                  <Archive className="w-4 h-4 mr-1" />
+                  Wayback
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const cacheUrl = `https://webcache.googleusercontent.com/search?q=cache:${encodeURIComponent(cleanUrl)}`;
+                    if (onUrlChange) onUrlChange(cacheUrl);
+                  }}
+                  className="border-green-500/50 text-green-400 hover:bg-green-500/20"
+                  data-testid="button-google-cache-loading"
+                >
+                  <Globe className="w-4 h-4 mr-1" />
+                  Google Cache
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => window.open(cleanUrl, "_blank")}
+                  className="border-orange-500/50 text-orange-400 hover:bg-orange-500/20"
+                  data-testid="button-new-tab-loading"
+                >
+                  <ExternalLink className="w-4 h-4 mr-1" />
+                  New Tab
+                </Button>
+              </div>
             )}
             
             {/* Protected site warning */}
