@@ -11,6 +11,33 @@ import { execSync } from 'child_process';
 // Configure Puppeteer with stealth plugin to bypass bot detection
 puppeteer.use(StealthPlugin());
 
+// ScraperAPI configuration - provides 5000 free requests
+// Sign up at https://www.scraperapi.com/ to get a free API key
+const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY || '';
+
+// Fetch using ScraperAPI (bypasses Cloudflare with residential proxies)
+async function fetchWithScraperAPI(targetUrl: string): Promise<{ html: string; status: number }> {
+  if (!SCRAPER_API_KEY) {
+    throw new Error('ScraperAPI key not configured');
+  }
+  
+  console.log(`[ScraperAPI] Fetching ${targetUrl} with premium proxies...`);
+  
+  const apiUrl = `http://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=true&premium=true`;
+  
+  const response = await fetch(apiUrl, {
+    headers: {
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    },
+    signal: AbortSignal.timeout(60000), // 60 second timeout
+  });
+  
+  const html = await response.text();
+  console.log(`[ScraperAPI] Got ${html.length} bytes, status ${response.status}`);
+  
+  return { html, status: response.status };
+}
+
 // Shared browser instance for efficiency
 let browserInstance: any = null;
 let browserLastUsed = 0;
@@ -424,20 +451,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let contentType = 'text/html';
       let usedPuppeteer = false;
       
-      // Check for force mode - skip regular fetch and go straight to Puppeteer
+      // Check for force mode - skip regular fetch and use advanced methods
       const forceMode = req.query.force === '1';
       
       if (forceMode) {
-        console.log(`[Proxy] Force mode enabled for ${targetUrl}, using Puppeteer directly...`);
-        try {
-          const puppeteerResult = await fetchWithPuppeteer(targetUrl);
-          html = puppeteerResult.html;
-          usedPuppeteer = true;
-          contentType = 'text/html';
-          console.log(`[Proxy] Force Puppeteer succeeded for ${targetUrl}`);
-        } catch (puppeteerError) {
-          console.error(`[Proxy] Force Puppeteer failed:`, puppeteerError);
-          return res.status(500).send("Force decrypt failed - site has advanced bot protection");
+        console.log(`[Proxy] Force mode enabled for ${targetUrl}`);
+        
+        // Try ScraperAPI first if configured (best success rate)
+        if (SCRAPER_API_KEY) {
+          try {
+            console.log(`[Proxy] Trying ScraperAPI...`);
+            const scraperResult = await fetchWithScraperAPI(targetUrl);
+            if (scraperResult.status === 200 && scraperResult.html.length > 1000 && 
+                !scraperResult.html.includes('cf-chl-widget') && 
+                !scraperResult.html.includes('Just a moment...')) {
+              html = scraperResult.html;
+              usedPuppeteer = true; // Mark as using advanced fetch
+              contentType = 'text/html';
+              console.log(`[Proxy] ScraperAPI succeeded for ${targetUrl}`);
+            } else {
+              console.log(`[Proxy] ScraperAPI returned blocked page, trying Puppeteer...`);
+              throw new Error('ScraperAPI returned blocked content');
+            }
+          } catch (scraperError) {
+            console.log(`[Proxy] ScraperAPI failed, falling back to Puppeteer:`, scraperError);
+            // Fall through to Puppeteer
+          }
+        }
+        
+        // Try Puppeteer if ScraperAPI didn't work or isn't configured
+        if (!html || html.length < 1000) {
+          try {
+            const puppeteerResult = await fetchWithPuppeteer(targetUrl);
+            html = puppeteerResult.html;
+            usedPuppeteer = true;
+            contentType = 'text/html';
+            console.log(`[Proxy] Force Puppeteer succeeded for ${targetUrl}`);
+          } catch (puppeteerError) {
+            console.error(`[Proxy] Force Puppeteer failed:`, puppeteerError);
+            if (!html) {
+              return res.status(500).send("Force decrypt failed - site has advanced bot protection. Add SCRAPER_API_KEY for better success.");
+            }
+          }
         }
       } else {
         // First try regular fetch
