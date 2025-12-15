@@ -7,6 +7,11 @@ import { z } from "zod";
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import { execSync } from 'child_process';
+import express from 'express';
+import { uvPath } from "@titaniumnetwork-dev/ultraviolet";
+import { epoxyPath } from "@mercuryworkshop/epoxy-transport";
+import { baremuxPath } from "@mercuryworkshop/bare-mux/node";
+import wisp from "wisp-server-node";
 
 // Configure Puppeteer with stealth plugin to bypass bot detection
 puppeteer.use(StealthPlugin());
@@ -3075,6 +3080,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
         serverWs.close();
       }
     });
+  });
+
+  // Ultraviolet proxy static files
+  // Serve custom UV config first (with corrected paths), then npm package files
+  const path = await import('path');
+  const customUvPath = path.join(process.cwd(), 'client/public/uv');
+  const publicPath = path.join(process.cwd(), 'client/public');
+  
+  // Serve the wrapper service worker with Service-Worker-Allowed header
+  app.get("/sw.js", (req, res, next) => {
+    res.setHeader('Service-Worker-Allowed', '/');
+    res.setHeader('Content-Type', 'application/javascript');
+    next();
+  }, express.static(publicPath));
+  
+  // Add Service-Worker-Allowed header to allow UV service worker to control /service/ scope
+  app.use("/uv/", (req, res, next) => {
+    res.setHeader('Service-Worker-Allowed', '/');
+    next();
+  }, express.static(customUvPath), express.static(uvPath));
+  
+  app.use("/epoxy/", express.static(epoxyPath));
+  app.use("/baremux/", express.static(baremuxPath));
+
+  // Wisp WebSocket handler for Ultraviolet
+  httpServer.on("upgrade", (req, socket, head) => {
+    if (req.url && req.url.startsWith("/wisp/")) {
+      wisp.routeRequest(req, socket, head);
+    }
   });
 
   return httpServer;

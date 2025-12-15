@@ -1,14 +1,29 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { ExternalLink, RefreshCw, Shield, Lock, Terminal, Skull, Archive, Globe } from "lucide-react";
+import { ExternalLink, RefreshCw, Shield, Lock, Terminal, Skull, Archive, Globe, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
+
+declare global {
+  interface Window {
+    __uv$config?: {
+      prefix: string;
+      encodeUrl: (url: string) => string;
+      decodeUrl: (url: string) => string;
+    };
+    BareMux?: {
+      BareMuxConnection: new (path: string) => {
+        setTransport: (path: string, args: unknown[]) => Promise<void>;
+      };
+    };
+  }
+}
 
 // Hacker-style loading messages
 const DECRYPT_MESSAGES = [
-  "Initializing secure tunnel...",
+  "Initializing Ultraviolet...",
   "Bypassing content filters...",
-  "Decrypting connection...",
+  "Connecting to WISP server...",
+  "Establishing proxy tunnel...",
   "Spoofing browser fingerprint...",
-  "Establishing proxy route...",
   "Injecting stealth headers...",
   "Circumventing firewall...",
   "Masking origin server...",
@@ -53,19 +68,9 @@ interface WebpageViewerProps {
   onUrlChange?: (newUrl: string) => void;
 }
 
-// Sites that require login or have unbypassable protection
-const UNPROXYABLE_SITES = [
-  'discord.com',      // Requires login, WebSocket gateway
-  'instagram.com',    // Requires login
-  'facebook.com',     // Requires login
-  'twitter.com',      // Requires login
-  'x.com',            // Requires login
-  'tiktok.com',       // Requires login
-  'linkedin.com',     // Requires login
-  'snapchat.com',     // Requires login
-  'whatsapp.com',     // Requires login
-  'messenger.com',    // Requires login
-];
+// Sites that require login - with Ultraviolet these now work!
+// Keeping empty array since UV handles WebSocket proxying
+const UNPROXYABLE_SITES: string[] = [];
 
 // Sites with Cloudflare protection (may work with bypass)
 const PROTECTED_SITES = [
@@ -130,19 +135,37 @@ function cleanUrlParams(url: string): string {
   }
 }
 
-// Obfuscate URL to hide domain names from content filters
+// Obfuscate URL to hide domain names from content filters (legacy fallback)
 function obfuscateUrl(url: string): string {
   const fullUrl = url.startsWith('http') ? url : `https://${url}`;
   const xored = fullUrl.split('').map(c => String.fromCharCode(c.charCodeAt(0) ^ OBFUSCATION_KEY)).join('');
   return btoa(xored).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
 }
 
-// Convert URL to obfuscated proxy format: /b/{encoded}
-function toProxyPath(url: string): string {
+// XOR encode URL for Ultraviolet (matches UV's xor codec)
+function xorEncode(str: string): string {
+  if (!str) return str;
+  const result = new Uint8Array(str.length);
+  for (let i = 0; i < str.length; i++) {
+    result[i] = str.charCodeAt(i) ^ 2;
+  }
+  return btoa(String.fromCharCode(...result))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '');
+}
+
+// Convert URL to Ultraviolet proxy format: /service/{xor-encoded}
+function toProxyPath(url: string, useUV: boolean = true): string {
   try {
     const fullUrl = url.startsWith('http') ? url : `https://${url}`;
-    return `/b/${obfuscateUrl(fullUrl)}`;
+    if (useUV && window.__uv$config) {
+      return `/service/${window.__uv$config.encodeUrl(fullUrl)}`;
+    }
+    // Use our own XOR encoding that matches UV's codec
+    return `/service/${xorEncode(fullUrl)}`;
   } catch (e) {
+    // Fallback to legacy proxy
     return `/b/${obfuscateUrl(url)}`;
   }
 }
@@ -154,9 +177,65 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
   const [forceMode, setForceMode] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [failReason, setFailReason] = useState('');
+  const [uvReady, setUvReady] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const loadTimeoutRef = useRef<NodeJS.Timeout>();
   const progressIntervalRef = useRef<NodeJS.Timeout>();
+
+  // Register Ultraviolet service worker on mount
+  useEffect(() => {
+    async function setupUltraviolet() {
+      try {
+        // Check if service workers are supported
+        if (!('serviceWorker' in navigator)) {
+          console.warn('Service workers not supported, using legacy proxy');
+          return;
+        }
+
+        console.log('[UV] Starting Ultraviolet setup...');
+
+        // Register the UV service worker (wrapper that imports bundle + config)
+        const registration = await navigator.serviceWorker.register('/sw.js', {
+          scope: '/service/',
+        });
+        console.log('[UV] Service Worker registered:', registration.scope);
+
+        // Wait for the service worker to be ready
+        await navigator.serviceWorker.ready;
+        console.log('[UV] Service Worker ready');
+
+        // Setup BareMux connection for Wisp transport
+        const wispUrl = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/wisp/`;
+        console.log('[UV] Setting up BareMux with Wisp URL:', wispUrl);
+        
+        try {
+          // Use dynamic import via Function to bypass Vite's static analysis
+          const importModule = new Function('url', 'return import(url)');
+          const bareModule = await importModule('/baremux/index.js');
+          console.log('[UV] BareMux module loaded:', Object.keys(bareModule));
+          
+          const connection = new bareModule.BareMuxConnection('/baremux/worker.js');
+          console.log('[UV] BareMux connection created');
+          
+          await connection.setTransport('/epoxy/index.js', [{ wisp: wispUrl }]);
+          console.log('[UV] Transport set successfully');
+        } catch (bareError: unknown) {
+          const errMsg = bareError instanceof Error ? bareError.message : String(bareError);
+          console.warn('[UV] BareMux setup failed (continuing with legacy):', errMsg);
+          // UV can still work without BareMux in some cases
+        }
+        
+        setUvReady(true);
+        console.log('[UV] Setup complete!');
+      } catch (error: unknown) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        console.error('[UV] Failed to setup Ultraviolet:', errMsg);
+        // Still allow fallback to legacy proxy
+      }
+    }
+
+    setupUltraviolet();
+  }, []);
 
   const cleanUrl = url.split('?_reload=')[0];
   
