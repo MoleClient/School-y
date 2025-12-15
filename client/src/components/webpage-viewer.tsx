@@ -18,6 +18,18 @@ const DECRYPT_MESSAGES = [
   "Reassembling packets...",
 ];
 
+// Force mode messages (smart bypass)
+const FORCE_MESSAGES = [
+  "Activating mobile bypass...",
+  "Querying Google cache...",
+  "Searching Wayback archive...",
+  "Trying Google Translate proxy...",
+  "Randomizing fingerprint...",
+  "Simulating human behavior...",
+  "Evading bot detection...",
+  "Launching stealth browser...",
+];
+
 // Generate random hex string
 function randomHex(length: number): string {
   return Array.from({ length }, () => 
@@ -307,9 +319,10 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
   useEffect(() => {
     if (!isLoading) return;
     
-    // Rotate through decrypt messages
+    // Rotate through decrypt messages (use force mode messages when in bypass mode)
+    const messages = forceMode ? FORCE_MESSAGES : DECRYPT_MESSAGES;
     const msgInterval = setInterval(() => {
-      setDecryptMsg(DECRYPT_MESSAGES[Math.floor(Math.random() * DECRYPT_MESSAGES.length)]);
+      setDecryptMsg(messages[Math.floor(Math.random() * messages.length)]);
     }, 2000);
     
     // Animate hex data

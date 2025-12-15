@@ -86,8 +86,21 @@ npm run dev
 4. **Reload**: Refresh the current page while preserving query parameters
 5. **Direct URLs**: Enter a URL directly in the address bar to visit any website
 
+## Smart Bypass System
+
+When sites block standard proxy access, School-y uses multiple intelligent bypass strategies:
+
+1. **Mobile User Agent** - Fetches pages as a mobile device (lighter protection on some sites)
+2. **Google Cache** - Retrieves Google's cached version of the page
+3. **Wayback Machine** - Gets archived snapshots from Archive.org
+4. **Google Translate Proxy** - Routes through Google's translation servers
+5. **Enhanced Puppeteer** - Stealth browser with fingerprint randomization and human-like behavior
+
+The "Bypass" button activates these strategies automatically in sequence until one succeeds.
+
 ## Known Limitations
 
 - Some websites prevent iframe embedding for security reasons (X-Frame-Options)
 - Demo search results are curated and limited without API keys
 - Proxy functionality is educational and not intended for production use at scale
+- Sites with aggressive Cloudflare Turnstile may still block access (try Wayback/Google Cache buttons)

@@ -11,31 +11,151 @@ import { execSync } from 'child_process';
 // Configure Puppeteer with stealth plugin to bypass bot detection
 puppeteer.use(StealthPlugin());
 
-// ScraperAPI configuration - provides 5000 free requests
-// Sign up at https://www.scraperapi.com/ to get a free API key
-const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY || '';
+// Smart bypass strategies without external API keys
 
-// Fetch using ScraperAPI (bypasses Cloudflare with residential proxies)
-async function fetchWithScraperAPI(targetUrl: string): Promise<{ html: string; status: number }> {
-  if (!SCRAPER_API_KEY) {
-    throw new Error('ScraperAPI key not configured');
+// Strategy 1: Google Translate Proxy - Routes through Google's servers
+async function fetchViaGoogleTranslate(targetUrl: string): Promise<{ html: string; status: number }> {
+  console.log(`[GoogleTranslate] Fetching ${targetUrl} via translation proxy...`);
+  
+  // Google Translate can fetch and display foreign pages - we use a fake language pair
+  const translateUrl = `https://translate.google.com/translate?sl=auto&tl=en&u=${encodeURIComponent(targetUrl)}`;
+  
+  const response = await fetch(translateUrl, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
+    },
+    signal: AbortSignal.timeout(30000),
+  });
+  
+  let html = await response.text();
+  
+  // Clean up Google Translate wrapper - extract the actual content
+  // The content is inside an iframe, but we get the translated page wrapper
+  console.log(`[GoogleTranslate] Got ${html.length} bytes`);
+  
+  return { html, status: response.status };
+}
+
+// Strategy 2: Archive.org Wayback Machine - Gets cached versions
+async function fetchViaWayback(targetUrl: string): Promise<{ html: string; status: number }> {
+  console.log(`[Wayback] Fetching latest snapshot of ${targetUrl}...`);
+  
+  // First check if there's a recent snapshot
+  const availabilityUrl = `https://archive.org/wayback/available?url=${encodeURIComponent(targetUrl)}`;
+  const checkResponse = await fetch(availabilityUrl, {
+    signal: AbortSignal.timeout(10000),
+  });
+  const availability = await checkResponse.json();
+  
+  if (availability?.archived_snapshots?.closest?.url) {
+    const snapshotUrl = availability.archived_snapshots.closest.url;
+    console.log(`[Wayback] Found snapshot: ${snapshotUrl}`);
+    
+    const response = await fetch(snapshotUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      },
+      signal: AbortSignal.timeout(30000),
+    });
+    
+    const html = await response.text();
+    console.log(`[Wayback] Got ${html.length} bytes from archive`);
+    return { html, status: response.status };
   }
   
-  console.log(`[ScraperAPI] Fetching ${targetUrl} with premium proxies...`);
+  throw new Error('No Wayback snapshot available');
+}
+
+// Strategy 3: Mobile User Agent - Some sites have lighter protection on mobile
+async function fetchAsMobile(targetUrl: string): Promise<{ html: string; status: number }> {
+  console.log(`[Mobile] Fetching ${targetUrl} with mobile user agent...`);
   
-  const apiUrl = `http://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=true&premium=true`;
+  const mobileUserAgents = [
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+  ];
   
-  const response = await fetch(apiUrl, {
+  const ua = mobileUserAgents[Math.floor(Math.random() * mobileUserAgents.length)];
+  
+  const response = await fetch(targetUrl, {
     headers: {
+      'User-Agent': ua,
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept-Encoding': 'identity',
+      'Cache-Control': 'no-cache',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'none',
+      'Sec-Fetch-User': '?1',
+      'Upgrade-Insecure-Requests': '1',
     },
-    signal: AbortSignal.timeout(60000), // 60 second timeout
+    redirect: 'follow',
+    signal: AbortSignal.timeout(20000),
   });
   
   const html = await response.text();
-  console.log(`[ScraperAPI] Got ${html.length} bytes, status ${response.status}`);
+  console.log(`[Mobile] Got ${html.length} bytes, status ${response.status}`);
   
   return { html, status: response.status };
+}
+
+// Strategy 4: Google Web Cache - Gets Google's cached version
+async function fetchViaGoogleCache(targetUrl: string): Promise<{ html: string; status: number }> {
+  console.log(`[GoogleCache] Fetching cached version of ${targetUrl}...`);
+  
+  const cacheUrl = `https://webcache.googleusercontent.com/search?q=cache:${encodeURIComponent(targetUrl)}&strip=1`;
+  
+  const response = await fetch(cacheUrl, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    },
+    signal: AbortSignal.timeout(15000),
+  });
+  
+  if (response.status === 404) {
+    throw new Error('No Google cache available');
+  }
+  
+  const html = await response.text();
+  console.log(`[GoogleCache] Got ${html.length} bytes`);
+  
+  return { html, status: response.status };
+}
+
+// Master bypass function - tries multiple strategies in sequence
+async function smartBypass(targetUrl: string): Promise<{ html: string; status: number; method: string }> {
+  const strategies = [
+    { name: 'Mobile', fn: () => fetchAsMobile(targetUrl) },
+    { name: 'GoogleCache', fn: () => fetchViaGoogleCache(targetUrl) },
+    { name: 'Wayback', fn: () => fetchViaWayback(targetUrl) },
+    { name: 'GoogleTranslate', fn: () => fetchViaGoogleTranslate(targetUrl) },
+  ];
+  
+  for (const strategy of strategies) {
+    try {
+      console.log(`[SmartBypass] Trying ${strategy.name} strategy...`);
+      const result = await strategy.fn();
+      
+      // Check if we got actual content (not a block page)
+      if (result.html.length > 500 && 
+          !result.html.includes('cf-chl-widget') &&
+          !result.html.includes('Just a moment...') &&
+          !result.html.includes('challenge-running')) {
+        console.log(`[SmartBypass] ${strategy.name} succeeded!`);
+        return { ...result, method: strategy.name };
+      }
+    } catch (error) {
+      console.log(`[SmartBypass] ${strategy.name} failed:`, error instanceof Error ? error.message : error);
+    }
+  }
+  
+  throw new Error('All bypass strategies failed');
 }
 
 // Shared browser instance for efficiency
@@ -88,43 +208,90 @@ async function getBrowser() {
   return browserInstance;
 }
 
-// Puppeteer-based fetch for Cloudflare-protected sites
+// Enhanced Puppeteer with better fingerprint randomization
 async function fetchWithPuppeteer(targetUrl: string): Promise<{ html: string; status: number }> {
-  console.log(`[Puppeteer] Fetching ${targetUrl} with stealth browser...`);
+  console.log(`[Puppeteer] Fetching ${targetUrl} with enhanced stealth browser...`);
   
   const browser = await getBrowser();
   const page = await browser.newPage();
   
   try {
-    // Set realistic viewport
-    await page.setViewport({ width: 1920, height: 1080 });
+    // Randomize viewport to look more natural
+    const viewports = [
+      { width: 1920, height: 1080 },
+      { width: 1366, height: 768 },
+      { width: 1536, height: 864 },
+      { width: 1440, height: 900 },
+      { width: 1280, height: 720 },
+    ];
+    const viewport = viewports[Math.floor(Math.random() * viewports.length)];
+    await page.setViewport(viewport);
     
-    // Set realistic user agent
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    // Randomize user agent from realistic options
+    const userAgents = [
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    ];
+    const ua = userAgents[Math.floor(Math.random() * userAgents.length)];
+    await page.setUserAgent(ua);
     
-    // Set extra headers to look more like a real browser
+    // Set realistic headers with some randomization
+    const languages = ['en-US,en;q=0.9', 'en-GB,en;q=0.9,en-US;q=0.8', 'en-US,en;q=0.9,es;q=0.8'];
     await page.setExtraHTTPHeaders({
-      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept-Language': languages[Math.floor(Math.random() * languages.length)],
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+      'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+      'Sec-Ch-Ua-Mobile': '?0',
+      'Sec-Ch-Ua-Platform': '"Windows"',
     });
     
-    // Navigate and wait for Cloudflare to pass
+    // Override navigator properties to avoid detection
+    await page.evaluateOnNewDocument(() => {
+      // Override webdriver property
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+      
+      // Add realistic plugins
+      Object.defineProperty(navigator, 'plugins', {
+        get: () => [
+          { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
+          { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
+          { name: 'Native Client', filename: 'internal-nacl-plugin' },
+        ],
+      });
+      
+      // Override languages
+      Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+      
+      // Mock permissions
+      const originalQuery = window.navigator.permissions.query;
+      window.navigator.permissions.query = (parameters: any) => 
+        parameters.name === 'notifications' 
+          ? Promise.resolve({ state: 'denied' } as PermissionStatus)
+          : originalQuery(parameters);
+    });
+    
+    // Add random delay before navigation (human-like)
+    await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 1000));
+    
+    // Navigate with networkidle2 for better JS-heavy page handling
     const response = await page.goto(targetUrl, {
-      waitUntil: 'domcontentloaded',
+      waitUntil: 'networkidle2',
       timeout: 45000
     });
     
-    // Wait for page to fully load
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    // Wait for initial render
+    await new Promise(resolve => setTimeout(resolve, 2000 + Math.random() * 1000));
     
     // Check for Cloudflare challenge and wait for it to complete
     let attempts = 0;
-    const maxAttempts = 12; // Up to 60 seconds total
+    const maxAttempts = 10;
     
     while (attempts < maxAttempts) {
       const content = await page.content();
       
-      // Check if we're past the challenge
       const hasChallenge = content.includes('challenge-running') || 
                           content.includes('cf-chl-widget') ||
                           content.includes('Verifying you are human') ||
@@ -132,47 +299,63 @@ async function fetchWithPuppeteer(targetUrl: string): Promise<{ html: string; st
                           content.includes('Checking your browser');
       
       if (!hasChallenge) {
-        console.log('[Puppeteer] Challenge completed or not present');
+        console.log('[Puppeteer] No challenge detected or challenge passed');
         break;
       }
       
-      console.log(`[Puppeteer] Cloudflare challenge in progress, waiting... (attempt ${attempts + 1}/${maxAttempts})`);
+      console.log(`[Puppeteer] Challenge in progress (attempt ${attempts + 1}/${maxAttempts})`);
       
-      // Try to click the checkbox if it exists (Turnstile)
+      // Human-like mouse movements
       try {
-        const checkbox = await page.$('input[type="checkbox"]');
-        if (checkbox) {
-          console.log('[Puppeteer] Found checkbox, clicking...');
-          await checkbox.click();
+        const centerX = viewport.width / 2;
+        const centerY = viewport.height / 2;
+        
+        // Move mouse in natural curve
+        for (let i = 0; i < 3; i++) {
+          await page.mouse.move(
+            centerX + (Math.random() - 0.5) * 200,
+            centerY + (Math.random() - 0.5) * 200,
+            { steps: 10 }
+          );
+          await new Promise(resolve => setTimeout(resolve, 100 + Math.random() * 200));
         }
         
-        // Also try clicking the Turnstile iframe checkbox
+        // Try to find and click Turnstile checkbox
         const frames = page.frames();
         for (const frame of frames) {
           try {
-            const turnstileCheckbox = await frame.$('#challenge-stage input');
-            if (turnstileCheckbox) {
-              console.log('[Puppeteer] Found Turnstile checkbox, clicking...');
-              await turnstileCheckbox.click();
+            const checkbox = await frame.$('input[type="checkbox"], .cf-turnstile');
+            if (checkbox) {
+              const box = await checkbox.boundingBox();
+              if (box) {
+                // Move to checkbox naturally
+                await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 20 });
+                await new Promise(resolve => setTimeout(resolve, 100 + Math.random() * 200));
+                await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+                console.log('[Puppeteer] Clicked Turnstile checkbox');
+              }
             }
           } catch (e) {}
         }
+        
+        // Also try main page checkbox
+        const mainCheckbox = await page.$('input[type="checkbox"]');
+        if (mainCheckbox) {
+          const box = await mainCheckbox.boundingBox();
+          if (box) {
+            await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 15 });
+            await new Promise(resolve => setTimeout(resolve, 50 + Math.random() * 100));
+            await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+          }
+        }
       } catch (e) {}
       
-      // Simulate some mouse movement to appear human
-      try {
-        await page.mouse.move(
-          100 + Math.random() * 300,
-          100 + Math.random() * 300
-        );
-      } catch (e) {}
-      
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      await new Promise(resolve => setTimeout(resolve, 3000 + Math.random() * 2000));
       attempts++;
     }
     
-    // Final wait and get content
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // Final wait
+    await new Promise(resolve => setTimeout(resolve, 1000));
     
     const html = await page.content();
     const status = response?.status() || 200;
@@ -457,40 +640,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (forceMode) {
         console.log(`[Proxy] Force mode enabled for ${targetUrl}`);
         
-        // Try ScraperAPI first if configured (best success rate)
-        if (SCRAPER_API_KEY) {
-          try {
-            console.log(`[Proxy] Trying ScraperAPI...`);
-            const scraperResult = await fetchWithScraperAPI(targetUrl);
-            if (scraperResult.status === 200 && scraperResult.html.length > 1000 && 
-                !scraperResult.html.includes('cf-chl-widget') && 
-                !scraperResult.html.includes('Just a moment...')) {
-              html = scraperResult.html;
-              usedPuppeteer = true; // Mark as using advanced fetch
-              contentType = 'text/html';
-              console.log(`[Proxy] ScraperAPI succeeded for ${targetUrl}`);
-            } else {
-              console.log(`[Proxy] ScraperAPI returned blocked page, trying Puppeteer...`);
-              throw new Error('ScraperAPI returned blocked content');
-            }
-          } catch (scraperError) {
-            console.log(`[Proxy] ScraperAPI failed, falling back to Puppeteer:`, scraperError);
-            // Fall through to Puppeteer
-          }
-        }
-        
-        // Try Puppeteer if ScraperAPI didn't work or isn't configured
-        if (!html || html.length < 1000) {
-          try {
-            const puppeteerResult = await fetchWithPuppeteer(targetUrl);
-            html = puppeteerResult.html;
+        // Try smart bypass strategies first (Mobile, Google Cache, Wayback, etc.)
+        try {
+          console.log(`[Proxy] Trying smart bypass strategies...`);
+          const bypassResult = await smartBypass(targetUrl);
+          if (bypassResult.html.length > 500) {
+            html = bypassResult.html;
             usedPuppeteer = true;
             contentType = 'text/html';
-            console.log(`[Proxy] Force Puppeteer succeeded for ${targetUrl}`);
+            console.log(`[Proxy] Smart bypass (${bypassResult.method}) succeeded for ${targetUrl}`);
+          }
+        } catch (bypassError) {
+          console.log(`[Proxy] Smart bypass failed, trying enhanced Puppeteer:`, bypassError);
+        }
+        
+        // Try enhanced Puppeteer if smart bypass didn't work
+        if (!html || html.length < 500) {
+          try {
+            const puppeteerResult = await fetchWithPuppeteer(targetUrl);
+            // Check if we actually got content (not a challenge page)
+            if (puppeteerResult.html.length > 1000 &&
+                !puppeteerResult.html.includes('cf-chl-widget') &&
+                !puppeteerResult.html.includes('Just a moment...')) {
+              html = puppeteerResult.html;
+              usedPuppeteer = true;
+              contentType = 'text/html';
+              console.log(`[Proxy] Enhanced Puppeteer succeeded for ${targetUrl}`);
+            } else {
+              console.log(`[Proxy] Puppeteer got challenge page, returning what we have`);
+              html = puppeteerResult.html;
+              usedPuppeteer = true;
+              contentType = 'text/html';
+            }
           } catch (puppeteerError) {
-            console.error(`[Proxy] Force Puppeteer failed:`, puppeteerError);
+            console.error(`[Proxy] Enhanced Puppeteer failed:`, puppeteerError);
             if (!html) {
-              return res.status(500).send("Force decrypt failed - site has advanced bot protection. Add SCRAPER_API_KEY for better success.");
+              return res.status(500).send("Bypass failed - site has advanced protection. Try Wayback Machine or Google Cache buttons.");
             }
           }
         }
