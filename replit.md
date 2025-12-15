@@ -35,8 +35,14 @@ The application uses an Opera GX-inspired gaming aesthetic:
 ### Backend
 - Express.js server
 - Search API integration (Brave Search or SerpAPI)
-- CORS proxy for embedding external websites
+- **Ultraviolet Proxy** for SPAs (React apps like ChatGPT)
+- Legacy CORS proxy fallback for simpler sites
 - In-memory storage for browser history
+
+### Proxy System
+The browser uses two proxy methods:
+1. **Ultraviolet (UV) Proxy** - Primary method for modern SPAs. Uses service worker at `/service/` with epoxy transport via wisp WebSocket. Handles client-side routing properly.
+2. **Legacy Proxy** - Fallback at `/b/` path for when UV isn't available. Works for simpler sites but may break SPAs.
 
 ## Search Configuration
 

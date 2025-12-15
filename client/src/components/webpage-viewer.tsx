@@ -184,40 +184,63 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
   const [loadFailed, setLoadFailed] = useState(false);
   const [failReason, setFailReason] = useState('');
   const [uvReady, setUvReady] = useState(false);
+  const uvReadyRef = useRef(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const loadTimeoutRef = useRef<NodeJS.Timeout>();
   const progressIntervalRef = useRef<NodeJS.Timeout>();
 
   // Wait for UV to be ready (set up in index.html)
   useEffect(() => {
+    let isMounted = true;
+    
     const checkUV = () => {
-      if ((window as unknown as { __uvReady?: boolean }).__uvReady === true) {
-        console.log('[Proxy] UV is ready');
-        setUvReady(true);
-      } else if ((window as unknown as { __uvReady?: boolean }).__uvReady === false) {
+      const win = window as unknown as { __uvReady?: boolean; __uv$config?: unknown };
+      
+      // Check both the ready flag AND that the config is loaded
+      if (win.__uvReady === true && win.__uv$config) {
+        console.log('[Proxy] UV is ready with config');
+        if (isMounted && !uvReadyRef.current) {
+          uvReadyRef.current = true;
+          setUvReady(true);
+        }
+        return true;
+      } else if (win.__uvReady === false) {
         console.log('[Proxy] UV setup failed, using legacy');
-        setUvReady(false);
+        return false;
       }
+      return null; // Still waiting
     };
     
     // Check immediately
-    checkUV();
+    if (checkUV() === true) return;
     
     // Also listen for the ready event
-    const handler = () => checkUV();
+    const handler = () => {
+      checkUV();
+    };
     window.addEventListener('uvready', handler);
     
-    // Fallback timeout - don't wait forever
-    const timeout = setTimeout(() => {
-      if (!uvReady) {
-        console.log('[Proxy] UV timeout, using legacy');
-        setUvReady(false);
+    // Poll periodically in case event was missed
+    const pollInterval = setInterval(() => {
+      if (checkUV() === true) {
+        clearInterval(pollInterval);
       }
-    }, 5000);
+    }, 500);
+    
+    // Fallback timeout - don't wait forever (10 seconds)
+    const timeout = setTimeout(() => {
+      if (!uvReadyRef.current) {
+        console.log('[Proxy] UV timeout after 10s, using legacy');
+        // Don't set uvReady to false explicitly, just let it stay false
+      }
+      clearInterval(pollInterval);
+    }, 10000);
     
     return () => {
+      isMounted = false;
       window.removeEventListener('uvready', handler);
       clearTimeout(timeout);
+      clearInterval(pollInterval);
     };
   }, []);
 
