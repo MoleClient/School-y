@@ -279,15 +279,15 @@ async function fetchWithPuppeteer(targetUrl: string): Promise<{ html: string; st
     // Navigate with networkidle2 for better JS-heavy page handling
     const response = await page.goto(targetUrl, {
       waitUntil: 'networkidle2',
-      timeout: 45000
+      timeout: 20000 // 20 second timeout
     });
     
     // Wait for initial render
-    await new Promise(resolve => setTimeout(resolve, 2000 + Math.random() * 1000));
+    await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 500));
     
     // Check for Cloudflare challenge and wait for it to complete
     let attempts = 0;
-    const maxAttempts = 10;
+    const maxAttempts = 4; // Max 4 attempts (about 12-16 seconds)
     
     while (attempts < maxAttempts) {
       const content = await page.content();
@@ -350,7 +350,7 @@ async function fetchWithPuppeteer(targetUrl: string): Promise<{ html: string; st
         }
       } catch (e) {}
       
-      await new Promise(resolve => setTimeout(resolve, 3000 + Math.random() * 2000));
+      await new Promise(resolve => setTimeout(resolve, 2000 + Math.random() * 1000));
       attempts++;
     }
     
@@ -537,7 +537,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const response = await fetch(targetUrl, {
       headers,
       redirect: 'follow',
-      signal: AbortSignal.timeout(20000),
+      signal: AbortSignal.timeout(10000), // 10 second timeout
     });
     
     console.log(`Response status: ${response.status} ${response.statusText}`);

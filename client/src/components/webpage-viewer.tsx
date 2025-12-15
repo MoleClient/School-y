@@ -216,16 +216,11 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
         clearTimeout(loadTimeoutRef.current);
       }
 
-      // Longer timeout for complex SPAs - show failure state after timeout
+      // Reasonable timeout - don't make users wait forever
       loadTimeoutRef.current = setTimeout(() => {
         setIsLoading(false);
         setLoadProgress(100);
-        // If still showing challenge page, mark as failed
-        if (isProtectedSite) {
-          setLoadFailed(true);
-          setFailReason('This site uses advanced bot protection that blocks proxy access.');
-        }
-      }, forceMode ? 90000 : 45000); // Longer timeout in force mode
+      }, forceMode ? 30000 : 15000); // 15s normal, 30s for bypass mode
     }
 
     return () => {
@@ -257,7 +252,7 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
     loadTimeoutRef.current = setTimeout(() => {
       setIsLoading(false);
       setLoadProgress(100);
-    }, 90000); // 90 second timeout for force mode
+    }, 30000); // 30 second timeout for force mode
   }, [cleanUrl, startProgressSimulation]);
 
   const handleLoad = useCallback(() => {
@@ -300,7 +295,7 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
     loadTimeoutRef.current = setTimeout(() => {
       setIsLoading(false);
       setLoadProgress(100);
-    }, 45000);
+    }, 15000); // 15 second timeout
   }, [cleanUrl, startProgressSimulation]);
 
   if (!cleanUrl) {
