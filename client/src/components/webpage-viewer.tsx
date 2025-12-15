@@ -53,16 +53,23 @@ interface WebpageViewerProps {
   onUrlChange?: (newUrl: string) => void;
 }
 
-// Sites known to have aggressive Cloudflare protection
+// Sites that require login or have unbypassable protection
+const UNPROXYABLE_SITES = [
+  'discord.com',      // Requires login, WebSocket gateway
+  'instagram.com',    // Requires login
+  'facebook.com',     // Requires login
+  'twitter.com',      // Requires login
+  'x.com',            // Requires login
+  'tiktok.com',       // Requires login
+  'linkedin.com',     // Requires login
+  'snapchat.com',     // Requires login
+  'whatsapp.com',     // Requires login
+  'messenger.com',    // Requires login
+];
+
+// Sites with Cloudflare protection (may work with bypass)
 const PROTECTED_SITES = [
   'downdetector.com',
-  'instagram.com',
-  'tiktok.com',
-  'facebook.com',
-  'twitter.com',
-  'x.com',
-  'linkedin.com',
-  'discord.com',
   'openai.com',
   'chatgpt.com',
   'anthropic.com',
@@ -153,7 +160,10 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
 
   const cleanUrl = url.split('?_reload=')[0];
   
-  // Check if this is a known protected site
+  // Check if this is an unproxyable site (requires login)
+  const isUnproxyable = cleanUrl ? UNPROXYABLE_SITES.some(site => cleanUrl.includes(site)) : false;
+  
+  // Check if this is a known protected site (Cloudflare etc)
   const isProtectedSite = cleanUrl ? PROTECTED_SITES.some(site => cleanUrl.includes(site)) : false;
   
   // Use path-based proxy format with optional force mode
@@ -340,8 +350,57 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
 
   return (
     <div className="relative w-full h-full bg-white dark:bg-gray-900">
+      {/* Unproxyable site warning - show immediately for sites that require login */}
+      {isUnproxyable && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-background z-20 overflow-hidden">
+          <div className="flex flex-col items-center gap-4 p-6 text-center max-w-lg">
+            <div className="w-16 h-16 rounded-full bg-red-500/10 border-2 border-red-500/30 flex items-center justify-center">
+              <Lock className="w-8 h-8 text-red-500" />
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-lg font-bold text-red-500 uppercase tracking-wider">
+                Login Required
+              </h3>
+              <p className="text-sm text-muted-foreground">
+                This site requires you to log in to view content. Social media and chat apps cannot be proxied.
+              </p>
+            </div>
+            
+            <div className="flex flex-wrap justify-center gap-2 mt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.open(cleanUrl, "_blank")}
+                className="border-primary/50 text-primary hover:bg-primary/20"
+                data-testid="button-open-direct"
+              >
+                <ExternalLink className="w-4 h-4 mr-1" />
+                Open in New Tab
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const waybackUrl = `https://web.archive.org/web/${cleanUrl}`;
+                  if (onUrlChange) onUrlChange(waybackUrl);
+                }}
+                className="border-blue-500/50 text-blue-400 hover:bg-blue-500/20"
+                data-testid="button-wayback-unproxyable"
+              >
+                <Archive className="w-4 h-4 mr-1" />
+                Try Wayback
+              </Button>
+            </div>
+            
+            <p className="text-xs text-muted-foreground/60 mt-4">
+              Tip: Try searching for websites that don't require login, like news sites, Wikipedia, or games.
+            </p>
+          </div>
+        </div>
+      )}
+      
       {/* Hacker-style loading overlay */}
-      {isLoading && (
+      {isLoading && !isUnproxyable && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-background z-10 overflow-hidden">
           {/* Matrix-style background effect */}
           <div className="absolute inset-0 opacity-5 pointer-events-none overflow-hidden">
