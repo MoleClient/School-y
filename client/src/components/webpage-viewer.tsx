@@ -155,17 +155,23 @@ function xorEncode(str: string): string {
     .replace(/=/g, '');
 }
 
-// Convert URL to Ultraviolet proxy format: /service/{xor-encoded}
-function toProxyPath(url: string, useUV: boolean = true): string {
+// Convert URL to proxy format - use UV if ready, otherwise legacy
+function toProxyPath(url: string, useUV: boolean = false): string {
   try {
     const fullUrl = url.startsWith('http') ? url : `https://${url}`;
+    
+    // Use UV when ready and available
     if (useUV && window.__uv$config) {
-      return `/service/${window.__uv$config.encodeUrl(fullUrl)}`;
+      const encoded = window.__uv$config.encodeUrl(fullUrl);
+      console.log('[Proxy] Using UV proxy for:', url);
+      return `/service/${encoded}`;
     }
-    // Use our own XOR encoding that matches UV's codec
-    return `/service/${xorEncode(fullUrl)}`;
-  } catch (e) {
+    
     // Fallback to legacy proxy
+    console.log('[Proxy] Using legacy proxy for:', url);
+    return `/b/${obfuscateUrl(url)}`;
+  } catch (e) {
+    console.error('[Proxy] Error encoding URL:', e);
     return `/b/${obfuscateUrl(url)}`;
   }
 }
@@ -182,59 +188,37 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
   const loadTimeoutRef = useRef<NodeJS.Timeout>();
   const progressIntervalRef = useRef<NodeJS.Timeout>();
 
-  // Register Ultraviolet service worker on mount
+  // Wait for UV to be ready (set up in index.html)
   useEffect(() => {
-    async function setupUltraviolet() {
-      try {
-        // Check if service workers are supported
-        if (!('serviceWorker' in navigator)) {
-          console.warn('Service workers not supported, using legacy proxy');
-          return;
-        }
-
-        console.log('[UV] Starting Ultraviolet setup...');
-
-        // Register the UV service worker (wrapper that imports bundle + config)
-        const registration = await navigator.serviceWorker.register('/sw.js', {
-          scope: '/service/',
-        });
-        console.log('[UV] Service Worker registered:', registration.scope);
-
-        // Wait for the service worker to be ready
-        await navigator.serviceWorker.ready;
-        console.log('[UV] Service Worker ready');
-
-        // Setup BareMux connection for Wisp transport
-        const wispUrl = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/wisp/`;
-        console.log('[UV] Setting up BareMux with Wisp URL:', wispUrl);
-        
-        try {
-          // Use dynamic import via Function to bypass Vite's static analysis
-          const importModule = new Function('url', 'return import(url)');
-          const bareModule = await importModule('/baremux/index.js');
-          console.log('[UV] BareMux module loaded:', Object.keys(bareModule));
-          
-          const connection = new bareModule.BareMuxConnection('/baremux/worker.js');
-          console.log('[UV] BareMux connection created');
-          
-          await connection.setTransport('/epoxy/index.js', [{ wisp: wispUrl }]);
-          console.log('[UV] Transport set successfully');
-        } catch (bareError: unknown) {
-          const errMsg = bareError instanceof Error ? bareError.message : String(bareError);
-          console.warn('[UV] BareMux setup failed (continuing with legacy):', errMsg);
-          // UV can still work without BareMux in some cases
-        }
-        
+    const checkUV = () => {
+      if ((window as unknown as { __uvReady?: boolean }).__uvReady === true) {
+        console.log('[Proxy] UV is ready');
         setUvReady(true);
-        console.log('[UV] Setup complete!');
-      } catch (error: unknown) {
-        const errMsg = error instanceof Error ? error.message : String(error);
-        console.error('[UV] Failed to setup Ultraviolet:', errMsg);
-        // Still allow fallback to legacy proxy
+      } else if ((window as unknown as { __uvReady?: boolean }).__uvReady === false) {
+        console.log('[Proxy] UV setup failed, using legacy');
+        setUvReady(false);
       }
-    }
-
-    setupUltraviolet();
+    };
+    
+    // Check immediately
+    checkUV();
+    
+    // Also listen for the ready event
+    const handler = () => checkUV();
+    window.addEventListener('uvready', handler);
+    
+    // Fallback timeout - don't wait forever
+    const timeout = setTimeout(() => {
+      if (!uvReady) {
+        console.log('[Proxy] UV timeout, using legacy');
+        setUvReady(false);
+      }
+    }, 5000);
+    
+    return () => {
+      window.removeEventListener('uvready', handler);
+      clearTimeout(timeout);
+    };
   }, []);
 
   const cleanUrl = url.split('?_reload=')[0];
@@ -246,7 +230,8 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
   const isProtectedSite = cleanUrl ? PROTECTED_SITES.some(site => cleanUrl.includes(site)) : false;
   
   // Use path-based proxy format with optional force mode
-  const proxyUrl = cleanUrl ? `${toProxyPath(cleanUrl)}${forceMode ? '?force=1' : ''}` : "";
+  // Use UV proxy when ready, fallback to legacy
+  const proxyUrl = cleanUrl ? `${toProxyPath(cleanUrl, uvReady)}${forceMode ? '?force=1' : ''}` : "";
 
   // Listen for navigation and download messages from the iframe
   useEffect(() => {
@@ -331,7 +316,7 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
     startProgressSimulation();
     
     if (iframeRef.current) {
-      const forcePath = `${toProxyPath(cleanUrl)}?force=1&t=${Date.now()}`;
+      const forcePath = `${toProxyPath(cleanUrl, uvReady)}?force=1&t=${Date.now()}`;
       iframeRef.current.src = forcePath;
     }
     
@@ -374,7 +359,7 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
     
     if (iframeRef.current) {
       // Force reload by changing src
-      const newSrc = `${toProxyPath(cleanUrl)}?_r=${Date.now()}`;
+      const newSrc = `${toProxyPath(cleanUrl, uvReady)}?_r=${Date.now()}`;
       iframeRef.current.src = newSrc;
     }
     
