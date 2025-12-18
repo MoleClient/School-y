@@ -155,19 +155,11 @@ function xorEncode(str: string): string {
     .replace(/=/g, '');
 }
 
-// Convert URL to proxy format - use UV if ready, otherwise legacy
-function toProxyPath(url: string, useUV: boolean = false): string {
+// Convert URL to proxy format - always use legacy proxy for iframes
+// UV proxy requires full navigation which doesn't work well with iframes
+function toProxyPath(url: string, _useUV: boolean = false): string {
   try {
-    const fullUrl = url.startsWith('http') ? url : `https://${url}`;
-    
-    // Use UV when ready and available
-    if (useUV && window.__uv$config) {
-      const encoded = window.__uv$config.encodeUrl(fullUrl);
-      console.log('[Proxy] Using UV proxy for:', url);
-      return `/service/${encoded}`;
-    }
-    
-    // Fallback to legacy proxy
+    // Always use legacy proxy for iframe embedding
     console.log('[Proxy] Using legacy proxy for:', url);
     return `/b/${obfuscateUrl(url)}`;
   } catch (e) {
@@ -255,6 +247,13 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
   // Use path-based proxy format with optional force mode
   // Use UV proxy when ready, fallback to legacy
   const proxyUrl = cleanUrl ? `${toProxyPath(cleanUrl, uvReady)}${forceMode ? '?force=1' : ''}` : "";
+  
+  // Debug logging
+  useEffect(() => {
+    if (cleanUrl && proxyUrl) {
+      console.log('[WebpageViewer] uvReady:', uvReady, 'proxyUrl:', proxyUrl);
+    }
+  }, [cleanUrl, proxyUrl, uvReady]);
 
   // Listen for navigation and download messages from the iframe
   useEffect(() => {
