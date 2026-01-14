@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { ExternalLink, RefreshCw, Shield, Lock, Terminal, Skull, Archive, Globe, Zap } from "lucide-react";
+import { ExternalLink, RefreshCw, Shield, Lock, Terminal, Skull, Archive, Globe, Zap, Monitor } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { RemoteBrowser } from "./remote-browser";
 
 declare global {
   interface Window {
@@ -81,8 +82,8 @@ const PROTECTED_SITES = [
   'claude.ai',
 ];
 
-// Interactive sites that need Full Window mode (service workers, complex SPAs)
-const FULL_WINDOW_SITES = [
+// Interactive sites that need Remote Browser mode (complex SPAs with service workers, WebSockets, etc.)
+const REMOTE_BROWSER_SITES = [
   'chatgpt.com',
   'claude.ai',
   'openai.com',
@@ -266,8 +267,8 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
   // Check if this is a known protected site (Cloudflare etc)
   const isProtectedSite = cleanUrl ? PROTECTED_SITES.some(site => cleanUrl.includes(site)) : false;
   
-  // Check if this is an interactive site that needs to open externally
-  const needsExternal = cleanUrl ? FULL_WINDOW_SITES.some(site => cleanUrl.includes(site)) : false;
+  // Check if this is an interactive site that needs Remote Browser mode
+  const useRemoteBrowser = cleanUrl ? REMOTE_BROWSER_SITES.some(site => cleanUrl.includes(site)) : false;
   
   // Open in new tab (direct, no proxy)
   const handleOpenExternal = useCallback(() => {
@@ -517,8 +518,8 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
         </div>
       )}
       
-      {/* Hacker-style loading overlay */}
-      {isLoading && !isUnproxyable && (
+      {/* Hacker-style loading overlay (skip for remote browser mode which has its own UI) */}
+      {isLoading && !isUnproxyable && !useRemoteBrowser && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-background z-10 overflow-hidden">
           {/* Matrix-style background effect */}
           <div className="absolute inset-0 opacity-5 pointer-events-none overflow-hidden">
@@ -585,7 +586,7 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
             {/* Action buttons - show after some loading time */}
             {loadProgress > 30 && (
               <div className="flex flex-wrap justify-center gap-2">
-                {needsExternal && (
+                {useRemoteBrowser && (
                   <Button
                     variant="default"
                     size="sm"
@@ -593,8 +594,8 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
                     className="bg-primary hover:bg-primary/80"
                     data-testid="button-open-external-loading"
                   >
-                    <ExternalLink className="w-4 h-4 mr-1" />
-                    Open Direct (Recommended)
+                    <Monitor className="w-4 h-4 mr-1" />
+                    Remote Browser Mode
                   </Button>
                 )}
                 {!forceMode && (
@@ -658,8 +659,8 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
         </div>
       )}
       
-      {/* Failed to load overlay */}
-      {loadFailed && !isLoading && (
+      {/* Failed to load overlay (skip for remote browser mode) */}
+      {loadFailed && !isLoading && !useRemoteBrowser && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/95 z-10 overflow-auto">
           <div className="flex flex-col items-center gap-4 p-6 text-center max-w-lg">
             <div className="w-16 h-16 rounded-full bg-yellow-500/10 border-2 border-yellow-500/30 flex items-center justify-center">
@@ -676,7 +677,7 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
             
             {/* Action buttons in a row */}
             <div className="flex flex-wrap justify-center gap-2 mt-2">
-              {needsExternal && (
+              {useRemoteBrowser && (
                 <Button
                   variant="default"
                   size="sm"
@@ -684,8 +685,8 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
                   className="bg-primary hover:bg-primary/80"
                   data-testid="button-open-external-failed"
                 >
-                  <ExternalLink className="w-4 h-4 mr-1" />
-                  Open Direct (Recommended)
+                  <Monitor className="w-4 h-4 mr-1" />
+                  Remote Browser Mode
                 </Button>
               )}
               <Button
@@ -763,24 +764,31 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
         </Button>
       </div>
 
-      {/* Optimized iframe with GPU acceleration hints */}
-      <iframe
-        ref={iframeRef}
-        src={proxyUrl}
-        className="w-full h-full border-0 bg-white dark:bg-gray-900"
-        style={{ 
-          transform: 'translateZ(0)',
-          willChange: 'transform',
-          backfaceVisibility: 'hidden'
-        }}
-        title="Webpage viewer"
-        onLoad={handleLoad}
-        onError={handleError}
-        sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-top-navigation allow-modals allow-pointer-lock allow-presentation allow-downloads"
-        allow="accelerometer; camera; encrypted-media; fullscreen; geolocation; gyroscope; microphone; midi; payment; picture-in-picture; clipboard-write"
-        referrerPolicy="no-referrer"
-        data-testid="iframe-webpage"
-      />
+      {/* Remote Browser for complex SPAs, iframe for simpler sites */}
+      {useRemoteBrowser ? (
+        <RemoteBrowser 
+          url={cleanUrl} 
+          onUrlChange={onUrlChange}
+        />
+      ) : (
+        <iframe
+          ref={iframeRef}
+          src={proxyUrl}
+          className="w-full h-full border-0 bg-white dark:bg-gray-900"
+          style={{ 
+            transform: 'translateZ(0)',
+            willChange: 'transform',
+            backfaceVisibility: 'hidden'
+          }}
+          title="Webpage viewer"
+          onLoad={handleLoad}
+          onError={handleError}
+          sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-top-navigation allow-modals allow-pointer-lock allow-presentation allow-downloads"
+          allow="accelerometer; camera; encrypted-media; fullscreen; geolocation; gyroscope; microphone; midi; payment; picture-in-picture; clipboard-write"
+          referrerPolicy="no-referrer"
+          data-testid="iframe-webpage"
+        />
+      )}
     </div>
   );
 }

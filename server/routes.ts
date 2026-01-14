@@ -3108,6 +3108,143 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Remote Browser WebSocket Server - Puppeteer-based streaming browser
+  const remoteBrowserWss = new WebSocketServer({ server: httpServer, path: '/api/remote-browser' });
+  
+  // Store active browser sessions
+  const browserSessions = new Map<WebSocket, { browser: any; page: any; streaming: boolean }>();
+  
+  remoteBrowserWss.on('connection', async (ws, req) => {
+    const parsedUrl = new URL(req.url || '', 'http://localhost');
+    const targetUrl = parsedUrl.searchParams.get('url');
+    
+    if (!targetUrl) {
+      ws.send(JSON.stringify({ type: 'error', message: 'Missing URL parameter' }));
+      ws.close();
+      return;
+    }
+    
+    console.log('[RemoteBrowser] Starting session for:', targetUrl);
+    
+    try {
+      // Launch browser with optimized settings
+      const browser = await puppeteer.launch({
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+          '--disable-software-rasterizer',
+          '--disable-extensions',
+          '--window-size=1280,800',
+        ],
+      });
+      
+      const page = await browser.newPage();
+      await page.setViewport({ width: 1280, height: 800 });
+      
+      // Set realistic user agent
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+      
+      browserSessions.set(ws, { browser, page, streaming: true });
+      
+      // Navigate to URL
+      ws.send(JSON.stringify({ type: 'status', message: 'Loading page...' }));
+      
+      await page.goto(targetUrl, { 
+        waitUntil: 'domcontentloaded',
+        timeout: 30000 
+      });
+      
+      ws.send(JSON.stringify({ type: 'status', message: 'Page loaded, starting stream...' }));
+      
+      // Screenshot streaming loop
+      const streamScreenshots = async () => {
+        const session = browserSessions.get(ws);
+        if (!session || !session.streaming || ws.readyState !== WebSocket.OPEN) {
+          return;
+        }
+        
+        try {
+          const screenshot = await page.screenshot({ 
+            type: 'jpeg',
+            quality: 60,
+            encoding: 'base64'
+          });
+          
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ 
+              type: 'frame', 
+              data: screenshot,
+              url: page.url()
+            }));
+          }
+          
+          // Continue streaming at ~10 FPS
+          setTimeout(streamScreenshots, 100);
+        } catch (e) {
+          // Page might have navigated or closed
+          setTimeout(streamScreenshots, 500);
+        }
+      };
+      
+      // Start streaming
+      streamScreenshots();
+      
+      // Handle incoming messages (mouse/keyboard events)
+      ws.on('message', async (data) => {
+        try {
+          const message = JSON.parse(data.toString());
+          const session = browserSessions.get(ws);
+          if (!session) return;
+          
+          switch (message.type) {
+            case 'click':
+              await session.page.mouse.click(message.x, message.y);
+              break;
+            case 'type':
+              await session.page.keyboard.type(message.text);
+              break;
+            case 'keydown':
+              await session.page.keyboard.press(message.key);
+              break;
+            case 'scroll':
+              await session.page.evaluate((deltaY: number) => {
+                window.scrollBy(0, deltaY);
+              }, message.deltaY);
+              break;
+            case 'navigate':
+              await session.page.goto(message.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+              break;
+          }
+        } catch (e) {
+          console.error('[RemoteBrowser] Event error:', e);
+        }
+      });
+      
+    } catch (error: any) {
+      console.error('[RemoteBrowser] Error:', error.message);
+      ws.send(JSON.stringify({ type: 'error', message: error.message }));
+      ws.close();
+    }
+    
+    // Cleanup on close
+    ws.on('close', async () => {
+      console.log('[RemoteBrowser] Session closed');
+      const session = browserSessions.get(ws);
+      if (session) {
+        session.streaming = false;
+        try {
+          await session.browser.close();
+        } catch (e) {
+          // Browser already closed
+        }
+        browserSessions.delete(ws);
+      }
+    });
+  });
+
   return httpServer;
 }
 
