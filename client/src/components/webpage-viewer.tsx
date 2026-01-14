@@ -84,6 +84,7 @@ const PROTECTED_SITES = [
 
 // Interactive sites that need Remote Browser mode (complex SPAs with service workers, WebSockets, etc.)
 const REMOTE_BROWSER_SITES = [
+  'youtube.com',
   'chatgpt.com',
   'claude.ai',
   'openai.com',
