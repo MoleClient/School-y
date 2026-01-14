@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { ExternalLink, RefreshCw, Shield, Lock, Terminal, Skull, Archive, Globe, Zap, Maximize2 } from "lucide-react";
+import { ExternalLink, RefreshCw, Shield, Lock, Terminal, Skull, Archive, Globe, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 declare global {
@@ -266,24 +266,14 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
   // Check if this is a known protected site (Cloudflare etc)
   const isProtectedSite = cleanUrl ? PROTECTED_SITES.some(site => cleanUrl.includes(site)) : false;
   
-  // Check if this is an interactive site that needs Full Window mode
-  const needsFullWindow = cleanUrl ? FULL_WINDOW_SITES.some(site => cleanUrl.includes(site)) : false;
+  // Check if this is an interactive site that needs to open externally
+  const needsExternal = cleanUrl ? FULL_WINDOW_SITES.some(site => cleanUrl.includes(site)) : false;
   
-  // Open in UV Full Window mode (full navigation, not iframe)
-  const handleFullWindow = useCallback(() => {
+  // Open in new tab (direct, no proxy)
+  const handleOpenExternal = useCallback(() => {
     if (!cleanUrl) return;
-    
     const fullUrl = cleanUrl.startsWith('http') ? cleanUrl : `https://${cleanUrl}`;
-    
-    // Use UV if available, otherwise just open direct
-    if (window.__uv$config) {
-      const encoded = window.__uv$config.encodeUrl(fullUrl);
-      const uvUrl = `/service/${encoded}`;
-      window.open(uvUrl, '_blank');
-    } else {
-      // Fallback to direct URL if UV not available
-      window.open(fullUrl, '_blank');
-    }
+    window.open(fullUrl, '_blank');
   }, [cleanUrl]);
   
   // Use path-based proxy format with optional force mode
@@ -595,16 +585,16 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
             {/* Action buttons - show after some loading time */}
             {loadProgress > 30 && (
               <div className="flex flex-wrap justify-center gap-2">
-                {needsFullWindow && (
+                {needsExternal && (
                   <Button
                     variant="default"
                     size="sm"
-                    onClick={handleFullWindow}
+                    onClick={handleOpenExternal}
                     className="bg-primary hover:bg-primary/80"
-                    data-testid="button-full-window"
+                    data-testid="button-open-external-loading"
                   >
-                    <Maximize2 className="w-4 h-4 mr-1" />
-                    Full Window (Recommended)
+                    <ExternalLink className="w-4 h-4 mr-1" />
+                    Open Direct (Recommended)
                   </Button>
                 )}
                 {!forceMode && (
@@ -686,16 +676,16 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
             
             {/* Action buttons in a row */}
             <div className="flex flex-wrap justify-center gap-2 mt-2">
-              {needsFullWindow && (
+              {needsExternal && (
                 <Button
                   variant="default"
                   size="sm"
-                  onClick={handleFullWindow}
+                  onClick={handleOpenExternal}
                   className="bg-primary hover:bg-primary/80"
-                  data-testid="button-full-window-failed"
+                  data-testid="button-open-external-failed"
                 >
-                  <Maximize2 className="w-4 h-4 mr-1" />
-                  Full Window (Recommended)
+                  <ExternalLink className="w-4 h-4 mr-1" />
+                  Open Direct (Recommended)
                 </Button>
               )}
               <Button
@@ -764,22 +754,12 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
         <Button
           size="sm"
           variant="default"
-          onClick={handleFullWindow}
+          onClick={handleOpenExternal}
           className="shadow-lg"
-          data-testid="button-full-window-hover"
-        >
-          <Maximize2 className="w-4 h-4 mr-1" />
-          Full Window
-        </Button>
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={() => window.open(cleanUrl, "_blank")}
-          className="shadow-lg"
-          data-testid="button-open-new-tab"
+          data-testid="button-open-external-hover"
         >
           <ExternalLink className="w-4 h-4 mr-1" />
-          New Tab
+          Open Direct
         </Button>
       </div>
 
