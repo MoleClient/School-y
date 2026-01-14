@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, ExternalLink, RefreshCw } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 interface RemoteBrowserProps {
   url: string;
@@ -10,12 +11,15 @@ export function RemoteBrowser({ url, onUrlChange }: RemoteBrowserProps) {
   const [status, setStatus] = useState<string>("Connecting...");
   const [isConnected, setIsConnected] = useState(false);
   const [currentFrame, setCurrentFrame] = useState<string | null>(null);
+  const [showFallback, setShowFallback] = useState(false);
+  const [connectionFailed, setConnectionFailed] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const lastReportedUrlRef = useRef<string>("");
   const onUrlChangeRef = useRef(onUrlChange);
   const initialUrlRef = useRef<string>(url);
   const isConnectedRef = useRef(false);
+  const fallbackTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   useEffect(() => {
     onUrlChangeRef.current = onUrlChange;
@@ -33,6 +37,15 @@ export function RemoteBrowser({ url, onUrlChange }: RemoteBrowserProps) {
     setStatus("Connecting to remote browser...");
     lastReportedUrlRef.current = "";
     isConnectedRef.current = true;
+    setShowFallback(false);
+    setConnectionFailed(false);
+
+    // Show fallback button after 5 seconds if not connected
+    fallbackTimeoutRef.current = setTimeout(() => {
+      if (!isConnectedRef.current) {
+        setShowFallback(true);
+      }
+    }, 5000);
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
@@ -40,6 +53,9 @@ export function RemoteBrowser({ url, onUrlChange }: RemoteBrowserProps) {
     ws.onopen = () => {
       console.log('[RemoteBrowser] WebSocket connected');
       setStatus("Loading page...");
+      if (fallbackTimeoutRef.current) {
+        clearTimeout(fallbackTimeoutRef.current);
+      }
     };
 
     ws.onmessage = (event) => {
@@ -71,18 +87,26 @@ export function RemoteBrowser({ url, onUrlChange }: RemoteBrowserProps) {
 
     ws.onerror = (error) => {
       console.error('[RemoteBrowser] WebSocket error:', error);
-      setStatus("Connection error");
+      setStatus("Connection failed - remote browser unavailable");
       setIsConnected(false);
+      setConnectionFailed(true);
+      setShowFallback(true);
     };
 
     ws.onclose = () => {
       console.log('[RemoteBrowser] WebSocket closed');
       setIsConnected(false);
-      setStatus("Disconnected");
+      if (!connectionFailed) {
+        setStatus("Disconnected");
+        setShowFallback(true);
+      }
     };
 
     return () => {
       isConnectedRef.current = false;
+      if (fallbackTimeoutRef.current) {
+        clearTimeout(fallbackTimeoutRef.current);
+      }
       if (ws.readyState === WebSocket.OPEN) {
         ws.close();
       }
@@ -137,11 +161,52 @@ export function RemoteBrowser({ url, onUrlChange }: RemoteBrowserProps) {
     >
       {!isConnected && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-background z-10">
-          <Loader2 className="w-8 h-8 animate-spin text-primary mb-4" />
+          {!connectionFailed && (
+            <Loader2 className="w-8 h-8 animate-spin text-primary mb-4" />
+          )}
           <p className="text-muted-foreground text-sm">{status}</p>
           <p className="text-xs text-muted-foreground/60 mt-2">
-            Launching remote browser for interactive mode...
+            {connectionFailed 
+              ? "The remote browser couldn't start. Use the buttons below to access this site."
+              : "Launching remote browser for interactive mode..."}
           </p>
+          
+          {showFallback && (
+            <div className="flex flex-col gap-3 mt-6">
+              <Button
+                variant="default"
+                onClick={() => {
+                  const fullUrl = initialUrlRef.current?.startsWith('http') 
+                    ? initialUrlRef.current 
+                    : `https://${initialUrlRef.current}`;
+                  window.open(fullUrl, '_blank');
+                }}
+                className="bg-primary hover:bg-primary/80"
+                data-testid="button-open-new-tab"
+              >
+                <ExternalLink className="w-4 h-4 mr-2" />
+                Open in New Tab
+              </Button>
+              
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setConnectionFailed(false);
+                  setShowFallback(false);
+                  isConnectedRef.current = false;
+                  setStatus("Retrying connection...");
+                  // Force re-mount by triggering the effect
+                  if (wsRef.current) {
+                    wsRef.current.close();
+                  }
+                }}
+                data-testid="button-retry-remote"
+              >
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Retry Remote Browser
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
