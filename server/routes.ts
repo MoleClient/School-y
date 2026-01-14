@@ -1175,13 +1175,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         headers: forwardHeaders,
       };
 
-      // Forward body for POST/PUT/PATCH
+      // Forward body for POST/PUT/PATCH - use raw Buffer directly
       if (['POST', 'PUT', 'PATCH'].includes(req.method) && req.body) {
-        if (typeof req.body === 'object') {
-          fetchOptions.body = JSON.stringify(req.body);
-        } else {
-          fetchOptions.body = req.body;
-        }
+        // req.body is now a Buffer from express.raw() middleware
+        fetchOptions.body = req.body;
       }
 
       const response = await fetch(targetUrl, fetchOptions);

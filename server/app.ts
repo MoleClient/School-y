@@ -27,12 +27,18 @@ declare module 'http' {
     rawBody: unknown
   }
 }
+// Handle proxy routes with raw body parsing BEFORE json parser
+// This prevents PayloadTooLargeError for large proxy requests
+app.use('/api/r', express.raw({ limit: '100mb', type: () => true }));
+
+// Standard body parsing for API routes
 app.use(express.json({
+  limit: '50mb',
   verify: (req, _res, buf) => {
     req.rawBody = buf;
   }
 }));
-app.use(express.urlencoded({ extended: false }));
+app.use(express.urlencoded({ extended: false, limit: '50mb' }));
 
 app.use((req, res, next) => {
   const start = Date.now();
