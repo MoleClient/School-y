@@ -270,6 +270,13 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
   // Check if this is an interactive site that needs Remote Browser mode
   const useRemoteBrowser = cleanUrl ? REMOTE_BROWSER_SITES.some(site => cleanUrl.includes(site)) : false;
   
+  // Debug logging for remote browser mode
+  useEffect(() => {
+    if (cleanUrl) {
+      console.log('[WebpageViewer] URL:', cleanUrl, 'useRemoteBrowser:', useRemoteBrowser);
+    }
+  }, [cleanUrl, useRemoteBrowser]);
+  
   // Open in new tab (direct, no proxy)
   const handleOpenExternal = useCallback(() => {
     if (!cleanUrl) return;
