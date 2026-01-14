@@ -168,11 +168,11 @@ function obfuscateUrl(url: string): string {
 // XOR encode URL for Ultraviolet (matches UV's xor codec)
 function xorEncode(str: string): string {
   if (!str) return str;
-  const result = new Uint8Array(str.length);
+  const result: number[] = [];
   for (let i = 0; i < str.length; i++) {
-    result[i] = str.charCodeAt(i) ^ 2;
+    result.push(str.charCodeAt(i) ^ 2);
   }
-  return btoa(String.fromCharCode(...result))
+  return btoa(String.fromCharCode.apply(null, result))
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=/g, '');
@@ -279,7 +279,8 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
   
   // Use path-based proxy format with optional force mode
   // Use UV proxy when ready, fallback to legacy
-  const proxyUrl = cleanUrl ? `${toProxyPath(cleanUrl, uvReady)}${forceMode ? '?force=1' : ''}` : "";
+  // Don't generate proxy URL for remote browser sites (prevents content filter interception)
+  const proxyUrl = (cleanUrl && !useRemoteBrowser) ? `${toProxyPath(cleanUrl, uvReady)}${forceMode ? '?force=1' : ''}` : "";
   
   // Debug logging
   useEffect(() => {
