@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { ExternalLink, RefreshCw, Shield, Lock, Terminal, Skull, Archive, Globe, Zap } from "lucide-react";
+import { ExternalLink, RefreshCw, Shield, Lock, Terminal, Skull, Archive, Globe, Zap, Maximize2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 declare global {
@@ -79,6 +79,28 @@ const PROTECTED_SITES = [
   'chatgpt.com',
   'anthropic.com',
   'claude.ai',
+];
+
+// Interactive sites that need Full Window mode (service workers, complex SPAs)
+const FULL_WINDOW_SITES = [
+  'chatgpt.com',
+  'claude.ai',
+  'openai.com',
+  'anthropic.com',
+  'discord.com',
+  'slack.com',
+  'notion.so',
+  'figma.com',
+  'canva.com',
+  'docs.google.com',
+  'drive.google.com',
+  'mail.google.com',
+  'outlook.live.com',
+  'office.com',
+  'github.com',
+  'codepen.io',
+  'replit.com',
+  'codesandbox.io',
 ];
 
 // XOR key for URL obfuscation (must match server)
@@ -243,6 +265,26 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
   
   // Check if this is a known protected site (Cloudflare etc)
   const isProtectedSite = cleanUrl ? PROTECTED_SITES.some(site => cleanUrl.includes(site)) : false;
+  
+  // Check if this is an interactive site that needs Full Window mode
+  const needsFullWindow = cleanUrl ? FULL_WINDOW_SITES.some(site => cleanUrl.includes(site)) : false;
+  
+  // Open in UV Full Window mode (full navigation, not iframe)
+  const handleFullWindow = useCallback(() => {
+    if (!cleanUrl) return;
+    
+    const fullUrl = cleanUrl.startsWith('http') ? cleanUrl : `https://${cleanUrl}`;
+    
+    // Use UV if available, otherwise just open direct
+    if (window.__uv$config) {
+      const encoded = window.__uv$config.encodeUrl(fullUrl);
+      const uvUrl = `/service/${encoded}`;
+      window.open(uvUrl, '_blank');
+    } else {
+      // Fallback to direct URL if UV not available
+      window.open(fullUrl, '_blank');
+    }
+  }, [cleanUrl]);
   
   // Use path-based proxy format with optional force mode
   // Use UV proxy when ready, fallback to legacy
@@ -553,6 +595,18 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
             {/* Action buttons - show after some loading time */}
             {loadProgress > 30 && (
               <div className="flex flex-wrap justify-center gap-2">
+                {needsFullWindow && (
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={handleFullWindow}
+                    className="bg-primary hover:bg-primary/80"
+                    data-testid="button-full-window"
+                  >
+                    <Maximize2 className="w-4 h-4 mr-1" />
+                    Full Window (Recommended)
+                  </Button>
+                )}
                 {!forceMode && (
                   <Button
                     variant="outline"
@@ -632,6 +686,18 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
             
             {/* Action buttons in a row */}
             <div className="flex flex-wrap justify-center gap-2 mt-2">
+              {needsFullWindow && (
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={handleFullWindow}
+                  className="bg-primary hover:bg-primary/80"
+                  data-testid="button-full-window-failed"
+                >
+                  <Maximize2 className="w-4 h-4 mr-1" />
+                  Full Window (Recommended)
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -694,6 +760,16 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
         >
           <RefreshCw className="w-4 h-4 mr-1" />
           Reload
+        </Button>
+        <Button
+          size="sm"
+          variant="default"
+          onClick={handleFullWindow}
+          className="shadow-lg"
+          data-testid="button-full-window-hover"
+        >
+          <Maximize2 className="w-4 h-4 mr-1" />
+          Full Window
         </Button>
         <Button
           size="sm"
