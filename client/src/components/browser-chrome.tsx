@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, KeyboardEvent } from "react";
-import { ChevronLeft, ChevronRight, RotateCw, Search, Globe } from "lucide-react";
+import { ChevronLeft, ChevronRight, RotateCw, Search, Globe, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { BrowserView } from "@/pages/browser";
@@ -102,6 +102,18 @@ export function BrowserChrome({
           >
             <RotateCw className="h-4 w-4" />
           </Button>
+          {view === "webpage" && currentUrl && (
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={() => window.open(currentUrl, "_blank")}
+              data-testid="button-open-external"
+              className="h-8 w-8 text-muted-foreground hover:text-primary"
+              title="Open in new tab"
+            >
+              <ExternalLink className="h-4 w-4" />
+            </Button>
+          )}
         </div>
 
         <form onSubmit={handleSubmit} className="flex-1 mx-2">
