@@ -84,7 +84,6 @@ const PROTECTED_SITES = [
 
 // Interactive sites that need Remote Browser mode (complex SPAs with service workers, WebSockets, etc.)
 const REMOTE_BROWSER_SITES = [
-  'youtube.com',
   'chatgpt.com',
   'claude.ai',
   'openai.com',
@@ -270,13 +269,6 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
   
   // Check if this is an interactive site that needs Remote Browser mode
   const useRemoteBrowser = cleanUrl ? REMOTE_BROWSER_SITES.some(site => cleanUrl.includes(site)) : false;
-  
-  // Debug logging for remote browser mode
-  useEffect(() => {
-    if (cleanUrl) {
-      console.log('[WebpageViewer] URL:', cleanUrl, 'useRemoteBrowser:', useRemoteBrowser);
-    }
-  }, [cleanUrl, useRemoteBrowser]);
   
   // Open in new tab (direct, no proxy)
   const handleOpenExternal = useCallback(() => {

@@ -13,12 +13,12 @@ export function RemoteBrowser({ url, onUrlChange }: RemoteBrowserProps) {
   const [currentFrame, setCurrentFrame] = useState<string | null>(null);
   const [showFallback, setShowFallback] = useState(false);
   const [connectionFailed, setConnectionFailed] = useState(false);
-  const [retryCount, setRetryCount] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const lastReportedUrlRef = useRef<string>("");
   const onUrlChangeRef = useRef(onUrlChange);
   const initialUrlRef = useRef<string>(url);
+  const isConnectedRef = useRef(false);
   const fallbackTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   useEffect(() => {
@@ -26,24 +26,25 @@ export function RemoteBrowser({ url, onUrlChange }: RemoteBrowserProps) {
   }, [onUrlChange]);
 
   useEffect(() => {
-    if (!initialUrlRef.current) return;
+    if (!initialUrlRef.current || isConnectedRef.current) return;
 
     const targetUrl = initialUrlRef.current;
     const fullUrl = targetUrl.startsWith('http') ? targetUrl : `https://${targetUrl}`;
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${wsProtocol}//${window.location.host}/api/remote-browser?url=${encodeURIComponent(fullUrl)}`;
 
-    console.log('[RemoteBrowser] Connecting to:', wsUrl, 'attempt:', retryCount);
+    console.log('[RemoteBrowser] Connecting to:', wsUrl);
     setStatus("Connecting to remote browser...");
-    setIsConnected(false);
-    setCurrentFrame(null);
     lastReportedUrlRef.current = "";
+    isConnectedRef.current = true;
     setShowFallback(false);
     setConnectionFailed(false);
 
-    // Show fallback button after 5 seconds if still not connected
+    // Show fallback button after 5 seconds if not connected
     fallbackTimeoutRef.current = setTimeout(() => {
-      setShowFallback(true);
+      if (!isConnectedRef.current) {
+        setShowFallback(true);
+      }
     }, 5000);
 
     const ws = new WebSocket(wsUrl);
@@ -102,6 +103,7 @@ export function RemoteBrowser({ url, onUrlChange }: RemoteBrowserProps) {
     };
 
     return () => {
+      isConnectedRef.current = false;
       if (fallbackTimeoutRef.current) {
         clearTimeout(fallbackTimeoutRef.current);
       }
@@ -109,7 +111,7 @@ export function RemoteBrowser({ url, onUrlChange }: RemoteBrowserProps) {
         ws.close();
       }
     };
-  }, [retryCount]);
+  }, []);
 
   const sendEvent = useCallback((event: object) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -189,8 +191,14 @@ export function RemoteBrowser({ url, onUrlChange }: RemoteBrowserProps) {
               <Button
                 variant="outline"
                 onClick={() => {
-                  // Increment retryCount to trigger the useEffect again
-                  setRetryCount(c => c + 1);
+                  setConnectionFailed(false);
+                  setShowFallback(false);
+                  isConnectedRef.current = false;
+                  setStatus("Retrying connection...");
+                  // Force re-mount by triggering the effect
+                  if (wsRef.current) {
+                    wsRef.current.close();
+                  }
                 }}
                 data-testid="button-retry-remote"
               >
