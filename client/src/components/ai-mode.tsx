@@ -1,28 +1,8 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Key } from "lucide-react";
+import { Send } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { STORAGE_KEY, ApiKeyDialog } from "./ai-overview";
-
-const MODEL = "openai/gpt-5.4";
-
-function GeminiSparkle({ size = 22, className = "" }: { size?: number; className?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 28 28" fill="none" className={className}>
-      <defs>
-        <linearGradient id="gspkl2" x1="0" y1="0" x2="28" y2="28">
-          <stop offset="0%" stopColor="#4285F4" />
-          <stop offset="50%" stopColor="#9B72CF" />
-          <stop offset="100%" stopColor="#D96570" />
-        </linearGradient>
-      </defs>
-      <path
-        d="M14 2C14 2 15.5 8.5 20 13C24.5 17.5 26 14 26 14C26 14 20.5 14.5 16 19C11.5 23.5 14 26 14 26C14 26 12.5 19.5 8 15C3.5 10.5 2 14 2 14C2 14 7.5 13.5 12 9C16.5 4.5 14 2 14 2Z"
-        fill="url(#gspkl2)"
-      />
-    </svg>
-  );
-}
+import { GeminiSparkle } from "./ai-overview";
 
 interface Message {
   role: "user" | "assistant";
@@ -46,28 +26,28 @@ function MarkdownMessage({ content, onResultClick }: { content: string; onResult
         ol: ({ children }) => <ol className="my-3 space-y-1 list-decimal list-inside">{children}</ol>,
         li: ({ children }) => (
           <li className="flex gap-2 items-start text-sm leading-relaxed">
-            <span className="mt-2 w-1.5 h-1.5 rounded-full bg-current flex-shrink-0 opacity-50" />
+            <span className="mt-2 w-1.5 h-1.5 rounded-full bg-current flex-shrink-0 opacity-40" />
             <span>{children}</span>
           </li>
         ),
-        h1: ({ children }) => <h1 className="text-xl font-semibold mt-4 mb-2">{children}</h1>,
-        h2: ({ children }) => <h2 className="text-lg font-semibold mt-3 mb-2">{children}</h2>,
-        h3: ({ children }) => <h3 className="text-base font-semibold mt-2 mb-1">{children}</h3>,
-        strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+        h1: ({ children }) => <h1 className="text-xl font-semibold mt-4 mb-2" style={{ color: "#202124" }}>{children}</h1>,
+        h2: ({ children }) => <h2 className="text-lg font-semibold mt-3 mb-2" style={{ color: "#202124" }}>{children}</h2>,
+        h3: ({ children }) => <h3 className="text-base font-semibold mt-2 mb-1" style={{ color: "#202124" }}>{children}</h3>,
+        strong: ({ children }) => <strong className="font-semibold" style={{ color: "#202124" }}>{children}</strong>,
         em: ({ children }) => <em className="italic">{children}</em>,
         blockquote: ({ children }) => (
-          <blockquote className="border-l-4 border-blue-400 pl-4 my-3 text-muted-foreground italic">{children}</blockquote>
+          <blockquote className="border-l-4 border-blue-400 pl-4 my-3 italic" style={{ color: "#5f6368" }}>{children}</blockquote>
         ),
         code: ({ className, children }: { className?: string; children?: React.ReactNode }) => {
           const isBlock = className?.startsWith("language-");
           return isBlock ? (
             <code className={`text-xs font-mono ${className || ""}`}>{children}</code>
           ) : (
-            <code className="px-1.5 py-0.5 rounded text-xs font-mono bg-muted text-foreground">{children}</code>
+            <code className="px-1.5 py-0.5 rounded text-xs font-mono" style={{ background: "#f1f3f4", color: "#202124" }}>{children}</code>
           );
         },
         pre: ({ children }: { children?: React.ReactNode }) => (
-          <pre className="bg-muted rounded-lg p-4 my-3 overflow-x-auto">{children}</pre>
+          <pre className="rounded-lg p-4 my-3 overflow-x-auto text-xs font-mono" style={{ background: "#f1f3f4" }}>{children}</pre>
         ),
         a: ({ href, children }) => (
           <button
@@ -82,8 +62,8 @@ function MarkdownMessage({ content, onResultClick }: { content: string; onResult
             <table className="w-full border-collapse text-sm">{children}</table>
           </div>
         ),
-        th: ({ children }) => <th className="border border-border px-3 py-2 bg-muted font-semibold text-left">{children}</th>,
-        td: ({ children }) => <td className="border border-border px-3 py-2">{children}</td>,
+        th: ({ children }) => <th className="border border-gray-200 px-3 py-2 font-semibold text-left" style={{ background: "#f8f9fa" }}>{children}</th>,
+        td: ({ children }) => <td className="border border-gray-200 px-3 py-2">{children}</td>,
       }}
     >
       {content}
@@ -97,8 +77,11 @@ function TypingIndicator() {
       {[0, 1, 2].map((i) => (
         <div
           key={i}
-          className="w-2 h-2 rounded-full bg-blue-400"
-          style={{ animation: `bounce 1.4s ease-in-out ${i * 0.16}s infinite` }}
+          className="w-2 h-2 rounded-full"
+          style={{
+            background: "linear-gradient(135deg, #4285F4, #9B72CF)",
+            animation: `bounce 1.4s ease-in-out ${i * 0.16}s infinite`,
+          }}
         />
       ))}
       <style>{`@keyframes bounce { 0%, 60%, 100% { transform: translateY(0) } 30% { transform: translateY(-6px) } }`}</style>
@@ -107,8 +90,6 @@ function TypingIndicator() {
 }
 
 export function AIMode({ query, searchResults, onResultClick }: AIModeProps) {
-  const [apiKey, setApiKey] = useState<string | null>(() => localStorage.getItem(STORAGE_KEY));
-  const [showDialog, setShowDialog] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
@@ -124,20 +105,14 @@ export function AIMode({ query, searchResults, onResultClick }: AIModeProps) {
   useEffect(() => { scrollToBottom(); }, [messages, streamContent]);
 
   useEffect(() => {
-    if (apiKey && query && !initializedRef.current) {
+    if (query && !initializedRef.current) {
       initializedRef.current = true;
       sendMessage(query, true);
     }
-  }, [apiKey, query]);
-
-  const handleSaveKey = (key: string) => {
-    localStorage.setItem(STORAGE_KEY, key);
-    setApiKey(key);
-    setShowDialog(false);
-  };
+  }, [query]);
 
   const sendMessage = async (text: string, isInitial = false) => {
-    if (!apiKey || isStreaming) return;
+    if (isStreaming) return;
     if (!text.trim()) return;
 
     const userMsg: Message = { role: "user", content: text.trim() };
@@ -147,40 +122,20 @@ export function AIMode({ query, searchResults, onResultClick }: AIModeProps) {
     setIsStreaming(true);
     setStreamContent("");
 
-    const context = searchResults
-      ? `Available web search results for "${query}":\n` + searchResults.slice(0, 6).map(r =>
-          `[${r.title}](${r.url}): ${r.description}`
-        ).join("\n")
-      : "";
-
-    const systemPrompt = `You are a helpful AI assistant integrated into School-y, a web browser. You help users find information and understand topics.
-
-${context ? `${context}\n\n` : ""}When citing sources, use markdown links like [source title](URL) — these will open in the browser. Use markdown formatting freely: **bold**, *italic*, bullet points, numbered lists, headers (##, ###), code blocks, tables. For math, use LaTeX notation. Be thorough, clear, and helpful.`;
-
     try {
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      const response = await fetch("/api/ai/chat", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": window.location.origin,
-          "X-Title": "School-y Browser",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: MODEL,
-          messages: [
-            { role: "system", content: systemPrompt },
-            ...newMessages.map(m => ({ role: m.role, content: m.content })),
-          ],
-          stream: true,
-          temperature: 0.6,
-          max_tokens: 1200,
+          messages: newMessages.map(m => ({ role: m.role, content: m.content })),
+          query,
+          searchResults: searchResults?.slice(0, 6),
         }),
       });
 
       if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(err?.error?.message || `HTTP ${response.status}`);
+        const err = await response.json().catch(() => ({})) as any;
+        throw new Error(err?.error || `HTTP ${response.status}`);
       }
 
       const reader = response.body?.getReader();
@@ -207,22 +162,15 @@ ${context ? `${context}\n\n` : ""}When citing sources, use markdown links like [
         }
       }
 
-      const assistantMsg: Message = {
-        role: "assistant",
-        content: fullContent,
-        sources: searchResults?.slice(0, 4),
-      };
-      setMessages(prev => [...prev, assistantMsg]);
-      setStreamContent("");
-    } catch (err: any) {
-      const errMsg = err?.message || "Failed to get response";
-      if (errMsg.includes("401") || errMsg.includes("Unauthorized")) {
-        localStorage.removeItem(STORAGE_KEY);
-        setApiKey(null);
-      }
       setMessages(prev => [
         ...prev,
-        { role: "assistant", content: `Error: ${errMsg}. Please try again.` },
+        { role: "assistant", content: fullContent, sources: searchResults?.slice(0, 4) },
+      ]);
+      setStreamContent("");
+    } catch (err: any) {
+      setMessages(prev => [
+        ...prev,
+        { role: "assistant", content: `Sorry, I couldn't get a response: ${err?.message || "Unknown error"}. Please try again.` },
       ]);
       setStreamContent("");
     } finally {
@@ -241,29 +189,6 @@ ${context ? `${context}\n\n` : ""}When citing sources, use markdown links like [
       if (input.trim() && !isStreaming) sendMessage(input.trim());
     }
   };
-
-  if (!apiKey) {
-    return (
-      <>
-        {showDialog && <ApiKeyDialog onSave={handleSaveKey} onClose={() => setShowDialog(false)} />}
-        <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
-          <GeminiSparkle size={52} className="mb-5" />
-          <h2 className="text-2xl font-medium text-foreground mb-2">AI Mode</h2>
-          <p className="text-muted-foreground text-sm mb-6 max-w-sm">
-            Get comprehensive AI-powered answers with sources, citations, and rich formatting.
-          </p>
-          <button
-            onClick={() => setShowDialog(true)}
-            className="px-6 py-2.5 rounded-full text-sm font-medium text-white"
-            style={{ background: "linear-gradient(135deg, #4285F4, #9B72CF)" }}
-            data-testid="button-setup-ai-mode"
-          >
-            Set Up AI Mode
-          </button>
-        </div>
-      </>
-    );
-  }
 
   return (
     <div className="flex flex-col h-full" style={{ background: "#fff" }}>
@@ -288,13 +213,14 @@ ${context ? `${context}\n\n` : ""}When citing sources, use markdown links like [
                             <button
                               key={si}
                               onClick={() => onResultClick(s.url)}
-                              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs text-muted-foreground hover:text-foreground border border-border hover:border-primary/30 transition-colors"
+                              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs hover:border-blue-300 transition-colors"
+                              style={{ border: "1px solid #dadce0", color: "#5f6368" }}
                               data-testid={`button-ai-source-${si}`}
                             >
                               {s.favicon ? (
                                 <img src={s.favicon} className="w-3 h-3 rounded-full" alt="" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
                               ) : (
-                                <div className="w-3 h-3 rounded-full bg-muted" />
+                                <div className="w-3 h-3 rounded-full bg-gray-200" />
                               )}
                               {domain}
                             </button>
@@ -320,7 +246,7 @@ ${context ? `${context}\n\n` : ""}When citing sources, use markdown links like [
               <div className="flex-shrink-0 mt-0.5">
                 <GeminiSparkle size={18} />
               </div>
-              <div className="flex-1 min-w-0 text-sm text-foreground leading-relaxed">
+              <div className="flex-1 min-w-0 text-sm leading-relaxed" style={{ color: "#202124" }}>
                 {streamContent ? (
                   <MarkdownMessage content={streamContent} onResultClick={onResultClick} />
                 ) : (
@@ -333,10 +259,13 @@ ${context ? `${context}\n\n` : ""}When citing sources, use markdown links like [
         </div>
       </div>
 
-      <div className="border-t border-border px-4 py-3" style={{ background: "#fff" }}>
+      <div className="border-t px-4 py-3" style={{ background: "#fff", borderColor: "#e8eaed" }}>
         <div className="max-w-[760px] mx-auto">
           <form onSubmit={handleSubmit} className="flex items-end gap-2">
-            <div className="flex-1 rounded-2xl overflow-hidden" style={{ border: "1.5px solid #dfe1e5", background: "#fff", boxShadow: "0 1px 6px rgba(32,33,36,0.1)" }}>
+            <div
+              className="flex-1 rounded-2xl overflow-hidden"
+              style={{ border: "1.5px solid #dfe1e5", background: "#fff", boxShadow: "0 1px 6px rgba(32,33,36,0.1)" }}
+            >
               <textarea
                 ref={inputRef}
                 value={input}
@@ -364,8 +293,8 @@ ${context ? `${context}\n\n` : ""}When citing sources, use markdown links like [
               <Send className="w-4 h-4" />
             </button>
           </form>
-          <p className="text-[11px] text-muted-foreground mt-1.5 text-center">
-            AI Mode uses {MODEL} · Responses may be inaccurate
+          <p className="text-[11px] mt-1.5 text-center" style={{ color: "#9aa0a6" }}>
+            Powered by AI · Responses may be inaccurate
           </p>
         </div>
       </div>

@@ -421,7 +421,82 @@ function cleanCache() {
   }
 }
 
+const OPENROUTER_MODEL = "openai/gpt-4o";
+
 export async function registerRoutes(app: Express): Promise<Server> {
+
+  // AI Overview - server-side using OPENROUTER_API_KEY secret
+  app.post("/api/ai/overview", async (req, res) => {
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) return res.status(503).json({ error: "AI not configured" });
+    try {
+      const { query, results } = req.body as { query: string; results?: Array<{ title: string; description: string; url: string }> };
+      if (!query) return res.status(400).json({ error: "query required" });
+      const context = results ? results.slice(0, 5).map(r => `Source: ${r.title} (${r.url})\n${r.description}`).join("\n\n") : "";
+      const prompt = `You are an AI search assistant providing an overview for the query: "${query}"\n\n${context ? `Search results for context:\n${context}\n\n` : ""}Provide a clear, well-formatted overview using markdown. Include:\n- A brief introductory sentence or two\n- 2-4 bullet points with **bold** key terms followed by concise explanations\n- Keep it factual and informative\n- Do not cite sources inline\n- Do not use h1/h2/h3 headers\n- Keep total length under 200 words`;
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", "HTTP-Referer": "https://school-y.replit.app", "X-Title": "School-y Browser" },
+        body: JSON.stringify({ model: OPENROUTER_MODEL, messages: [{ role: "user", content: prompt }], max_tokens: 300, temperature: 0.4 }),
+        signal: AbortSignal.timeout(20000),
+      });
+      const data = await response.json() as any;
+      if (data.error) return res.status(400).json({ error: data.error.message });
+      const text = data.choices?.[0]?.message?.content;
+      if (!text) return res.status(500).json({ error: "No response from AI" });
+      res.json({ summary: text.trim() });
+    } catch (e: any) {
+      console.error("AI overview error:", e);
+      res.status(500).json({ error: e.message || "AI overview failed" });
+    }
+  });
+
+  // AI Chat (streaming) - server-side using OPENROUTER_API_KEY secret
+  app.post("/api/ai/chat", async (req, res) => {
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) return res.status(503).json({ error: "AI not configured" });
+    try {
+      const { messages, query, searchResults } = req.body as {
+        messages: Array<{ role: string; content: string }>;
+        query?: string;
+        searchResults?: Array<{ title: string; description: string; url: string }>;
+      };
+      if (!messages?.length) return res.status(400).json({ error: "messages required" });
+      const context = searchResults ? `Available web search results for "${query}":\n` + searchResults.slice(0, 6).map(r => `[${r.title}](${r.url}): ${r.description}`).join("\n") : "";
+      const systemPrompt = `You are a helpful AI assistant integrated into School-y, a web browser. You help users find information and understand topics.\n\n${context ? `${context}\n\n` : ""}When citing sources, use markdown links like [source title](URL). Use markdown formatting freely: **bold**, *italic*, bullet points, numbered lists, headers (##, ###), code blocks, tables. Be thorough, clear, and helpful.`;
+      const upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", "HTTP-Referer": "https://school-y.replit.app", "X-Title": "School-y Browser" },
+        body: JSON.stringify({ model: OPENROUTER_MODEL, messages: [{ role: "system", content: systemPrompt }, ...messages], stream: true, temperature: 0.6, max_tokens: 1200 }),
+        signal: AbortSignal.timeout(60000),
+      });
+      if (!upstream.ok) {
+        const err = await upstream.json().catch(() => ({})) as any;
+        return res.status(upstream.status).json({ error: err?.error?.message || `HTTP ${upstream.status}` });
+      }
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      const reader = upstream.body?.getReader();
+      if (!reader) return res.end();
+      const decoder = new TextDecoder();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(decoder.decode(value, { stream: true }));
+      }
+      res.end();
+    } catch (e: any) {
+      console.error("AI chat error:", e);
+      if (!res.headersSent) res.status(500).json({ error: e.message || "AI chat failed" });
+    }
+  });
+
+  // Check if AI is available
+  app.get("/api/ai/status", (_req, res) => {
+    res.json({ available: !!process.env.OPENROUTER_API_KEY, model: OPENROUTER_MODEL });
+  });
+
   app.get("/api/search", async (req, res) => {
     try {
       const query = req.query.query as string;
