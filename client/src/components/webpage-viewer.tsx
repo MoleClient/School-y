@@ -34,6 +34,16 @@ const REMOTE_BROWSER_SITES = [
   'mail.google.com',
   'outlook.live.com',
   'office.com',
+  'github.com',
+  'reddit.com',
+  'twitter.com',
+  'x.com',
+  'instagram.com',
+  'facebook.com',
+  'tiktok.com',
+  'netflix.com',
+  'linkedin.com',
+  'twitch.tv',
 ];
 
 // XOR key for URL obfuscation (must match server)
@@ -113,6 +123,7 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
   const [showError, setShowError] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [uvReady, setUvReady] = useState(false);
+  const [uvFailed, setUvFailed] = useState(false);
   const [showNav, setShowNav] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const loadTimeoutRef = useRef<NodeJS.Timeout>();
@@ -149,7 +160,7 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
 
   const cleanUrl = url.split('?_reload=')[0];
   const useRemoteBrowser = cleanUrl ? REMOTE_BROWSER_SITES.some(s => cleanUrl.includes(s)) : false;
-  const proxyUrl = (cleanUrl && !useRemoteBrowser) ? toProxyUrl(cleanUrl, uvReady) : "";
+  const proxyUrl = (cleanUrl && !useRemoteBrowser) ? toProxyUrl(cleanUrl, uvReady && !uvFailed) : "";
 
   // Listen for navigation messages from proxy iframe
   useEffect(() => {
@@ -201,6 +212,16 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
   }, [cleanUrl]);
 
   const handleLoad = useCallback(() => {
+    // Detect UV error page and fall back to legacy proxy
+    try {
+      const doc = iframeRef.current?.contentDocument;
+      const title = doc?.title || '';
+      const bodyText = doc?.body?.innerText || '';
+      if (title.includes('Error') && (bodyText.includes('Hyper client') || bodyText.includes('Wisp') || bodyText.includes('WebSocket'))) {
+        setUvFailed(true);
+        return; // New URL will load via legacy proxy
+      }
+    } catch { /* cross-origin - can't read, treat as success */ }
     if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
     if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
     setLoadProgress(100);

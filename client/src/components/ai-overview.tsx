@@ -55,39 +55,38 @@ export function AIOverview({ query, results, onResultClick }: AIOverviewProps) {
       .finally(() => setIsLoading(false));
   }, [query, results]);
 
-  const PREVIEW_LENGTH = 280;
+  const PREVIEW_LENGTH = 320;
   const needsExpand = summary && summary.length > PREVIEW_LENGTH;
   const displayedSummary = summary && !expanded && needsExpand
     ? summary.slice(0, PREVIEW_LENGTH) + "..."
     : summary;
 
-  const sources = results?.slice(0, 4) || [];
-
   return (
     <div
-      className="mb-6 rounded-2xl overflow-hidden"
-      style={{ background: "linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #1a1a2e 100%)" }}
+      className="mb-6 rounded-2xl overflow-hidden border border-blue-100 dark:border-white/10 bg-[#e8f0fe] dark:bg-[#1a1a2e]"
       data-testid="section-ai-overview"
     >
       <div className="px-5 py-4">
         <div className="flex items-center gap-2.5 mb-3">
           <GeminiSparkle size={20} />
-          <span className="text-[15px] font-medium text-white">AI Overview</span>
+          <span className="text-[15px] font-medium text-[#1a1a2e] dark:text-white">AI Overview</span>
         </div>
 
         {isLoading ? (
           <div className="space-y-2.5 py-1">
-            <div className="h-3 rounded-full animate-pulse w-full" style={{ background: "rgba(255,255,255,0.1)" }} />
-            <div className="h-3 rounded-full animate-pulse w-11/12" style={{ background: "rgba(255,255,255,0.08)" }} />
-            <div className="h-3 rounded-full animate-pulse w-4/5" style={{ background: "rgba(255,255,255,0.06)" }} />
-            <div className="h-3 rounded-full animate-pulse w-3/5" style={{ background: "rgba(255,255,255,0.05)" }} />
+            <div className="h-3 rounded-full animate-pulse bg-blue-300/50 dark:bg-white/10 w-full" />
+            <div className="h-3 rounded-full animate-pulse bg-blue-300/40 dark:bg-white/08 w-11/12" />
+            <div className="h-3 rounded-full animate-pulse bg-blue-300/30 dark:bg-white/06 w-4/5" />
+            <div className="h-3 rounded-full animate-pulse bg-blue-300/20 dark:bg-white/05 w-3/5" />
           </div>
         ) : error ? (
           <div className="flex items-center justify-between gap-4">
-            <p className="text-sm text-white/50">{error.includes("AI not configured") ? "AI Overview unavailable." : `Could not load overview.`}</p>
+            <p className="text-sm text-[#5f6368] dark:text-white/50">
+              {error.includes("AI not configured") ? "AI Overview unavailable." : "Could not load overview."}
+            </p>
             <button
               onClick={() => { fetchedRef.current = ""; setSummary(null); setError(null); }}
-              className="flex-shrink-0 px-3 py-1 text-xs rounded-full border border-white/20 text-white/70 hover:bg-white/10 transition-colors"
+              className="flex-shrink-0 px-3 py-1 text-xs rounded-full border border-blue-300 dark:border-white/20 text-[#1a73e8] dark:text-white/70 hover:bg-blue-100 dark:hover:bg-white/10 transition-colors"
               data-testid="button-retry-ai"
             >
               Retry
@@ -95,7 +94,7 @@ export function AIOverview({ query, results, onResultClick }: AIOverviewProps) {
           </div>
         ) : summary ? (
           <div>
-            <div className="text-sm text-white/90 leading-relaxed" data-testid="text-ai-summary">
+            <div className="text-sm text-[#202124] dark:text-white/90 leading-relaxed" data-testid="text-ai-summary">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 components={{
@@ -104,49 +103,25 @@ export function AIOverview({ query, results, onResultClick }: AIOverviewProps) {
                   ol: ({ children }) => <ol className="space-y-1.5 my-2 list-decimal list-inside">{children}</ol>,
                   li: ({ children }) => (
                     <li className="flex gap-2 items-start">
-                      <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-white/60 flex-shrink-0" />
+                      <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-[#1a73e8]/60 dark:bg-white/60 flex-shrink-0" />
                       <span>{children}</span>
                     </li>
                   ),
-                  strong: ({ children }) => <strong className="font-semibold text-white">{children}</strong>,
-                  em: ({ children }) => <em className="italic text-white/80">{children}</em>,
+                  strong: ({ children }) => <strong className="font-semibold text-[#1a1a2e] dark:text-white">{children}</strong>,
+                  em: ({ children }) => <em className="italic text-[#5f6368] dark:text-white/80">{children}</em>,
                   a: ({ href, children }) => (
-                    <button onClick={() => href && onResultClick?.(href)} className="text-blue-400 hover:underline cursor-pointer bg-transparent border-none p-0">
+                    <button onClick={() => href && onResultClick?.(href)} className="text-[#1a73e8] dark:text-blue-400 hover:underline cursor-pointer bg-transparent border-none p-0">
                       {children}
                     </button>
                   ),
                   code: ({ children }) => (
-                    <code className="px-1.5 py-0.5 rounded text-xs font-mono" style={{ background: "rgba(255,255,255,0.12)" }}>{children}</code>
+                    <code className="px-1.5 py-0.5 rounded text-xs font-mono bg-blue-100 dark:bg-white/12 text-[#1a1a2e] dark:text-white">{children}</code>
                   ),
                 }}
               >
                 {displayedSummary || ""}
               </ReactMarkdown>
             </div>
-
-            {sources.length > 0 && (
-              <div className="flex items-center gap-2 mt-3 flex-wrap">
-                {sources.map((s, i) => {
-                  const domain = (() => { try { return new URL(s.url).hostname.replace("www.", ""); } catch { return s.url; } })();
-                  return (
-                    <button
-                      key={i}
-                      onClick={() => onResultClick?.(s.url)}
-                      className="flex items-center gap-1.5 px-2 py-1 rounded-full text-xs text-white/60 hover:text-white/90 hover:bg-white/10 transition-colors"
-                      style={{ border: "1px solid rgba(255,255,255,0.12)" }}
-                      data-testid={`button-source-${i}`}
-                    >
-                      {s.favicon ? (
-                        <img src={s.favicon} className="w-3 h-3 rounded-full" alt="" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-                      ) : (
-                        <div className="w-3 h-3 rounded-full bg-white/20" />
-                      )}
-                      {domain}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
           </div>
         ) : null}
       </div>
@@ -154,8 +129,7 @@ export function AIOverview({ query, results, onResultClick }: AIOverviewProps) {
       {summary && needsExpand && (
         <button
           onClick={() => setExpanded(!expanded)}
-          className="w-full flex items-center justify-center gap-2 py-3 text-sm text-white/60 hover:text-white/80 transition-colors border-t"
-          style={{ borderColor: "rgba(255,255,255,0.08)" }}
+          className="w-full flex items-center justify-center gap-2 py-3 text-sm text-[#1a73e8] dark:text-white/60 hover:bg-blue-100 dark:hover:bg-white/10 transition-colors border-t border-blue-100 dark:border-white/08"
           data-testid="button-show-more-ai"
         >
           {expanded ? (
