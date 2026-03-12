@@ -47,16 +47,10 @@ The browser uses multiple proxy methods:
 
 ## Search Configuration
 
-### Option 1: Brave Search API (Recommended)
-1. Get a free API key from [Brave Search API](https://brave.com/search/api/)
-2. Add to your environment: `BRAVE_SEARCH_API_KEY=your_key_here`
+No API keys needed. School-y scrapes DuckDuckGo HTML (`https://html.duckduckgo.com/html/`) for real web search results using cheerio. Demo mode is a fallback only if DuckDuckGo is unreachable.
 
-### Option 2: SerpAPI
-1. Get an API key from [SerpAPI](https://serpapi.com/)
-2. Add to your environment: `SERPAPI_KEY=your_key_here`
-
-### Demo Mode
-Without API keys, School-y runs in demo mode with curated search results.
+### Autocomplete Suggestions
+Uses DuckDuckGo autocomplete (`https://duckduckgo.com/ac/?q=...`) — no API key required.
 
 ## AI Overview (Beta)
 The search results page includes a "Beta AI Overview" section that will display AI-generated summaries. User needs to provide:

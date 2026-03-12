@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { SearchResult } from "@shared/schema";
 import { Search, Globe, Clock, ExternalLink } from "lucide-react";
@@ -50,13 +50,52 @@ function SearchBar({
   activeTab: Tab;
   onTabChange: (t: Tab) => void;
 }) {
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [inputVal, setInputVal] = useState(query);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [showSugg, setShowSugg] = useState(false);
+  const [selIdx, setSelIdx] = useState(-1);
+  const suggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const val = inputRef.current?.value.trim();
-    if (val) onSearch(val);
+  useEffect(() => { setInputVal(query); }, [query]);
+
+  const handleChange = (v: string) => {
+    setInputVal(v);
+    setSelIdx(-1);
+    if (suggestTimer.current) clearTimeout(suggestTimer.current);
+    if (v.length < 2) { setSuggestions([]); setShowSugg(false); return; }
+    suggestTimer.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/search/suggestions?q=${encodeURIComponent(v)}`);
+        const data = await res.json();
+        setSuggestions(Array.isArray(data) ? data : []);
+        setShowSugg(true);
+      } catch { setSuggestions([]); }
+    }, 220);
   };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (showSugg && suggestions.length > 0) {
+      if (e.key === "ArrowDown") { e.preventDefault(); setSelIdx(i => Math.min(i + 1, suggestions.length - 1)); return; }
+      if (e.key === "ArrowUp") { e.preventDefault(); setSelIdx(i => Math.max(i - 1, -1)); return; }
+      if (e.key === "Escape") { setShowSugg(false); setSelIdx(-1); return; }
+    }
+    if (e.key === "Enter") {
+      const val = selIdx >= 0 ? suggestions[selIdx] : inputVal;
+      setShowSugg(false);
+      if (val.trim()) onSearch(val.trim());
+    }
+  };
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setShowSugg(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const isOpen = showSugg && suggestions.length > 0;
 
   return (
     <div className="sticky top-0 z-50 bg-background border-b border-border">
@@ -65,19 +104,36 @@ function SearchBar({
           <div className="flex-shrink-0">
             <SchoolyLogo size="small" onClick={() => onSearch("")} />
           </div>
-          <form onSubmit={handleSubmit} className="flex-1 max-w-[580px]">
-            <div className="flex items-center rounded-full border border-[#dfe1e5] shadow-sm hover:shadow-md transition-shadow px-4 py-2.5 gap-2 bg-background">
+          <div ref={containerRef} className="relative flex-1 max-w-[580px]">
+            <div className={`flex items-center border border-[#dfe1e5] shadow-sm hover:shadow-md transition-shadow px-4 py-2.5 gap-2 bg-background ${isOpen ? "rounded-t-2xl border-b-transparent shadow-md" : "rounded-full"}`}>
               <Search className="h-4 w-4 text-muted-foreground flex-shrink-0" />
               <input
-                ref={inputRef}
                 type="text"
-                defaultValue={query}
-                key={query}
+                value={inputVal}
+                onChange={(e) => handleChange(e.target.value)}
+                onKeyDown={handleKeyDown}
+                onFocus={() => { if (suggestions.length > 0) setShowSugg(true); }}
                 className="flex-1 bg-transparent outline-none text-sm text-foreground"
                 data-testid="input-search-bar"
+                autoComplete="off"
               />
             </div>
-          </form>
+            {isOpen && (
+              <div className="absolute top-full left-0 right-0 bg-background border border-[#dfe1e5] border-t-0 rounded-b-2xl shadow-md z-50 overflow-hidden">
+                <div className="h-px bg-[#e8eaed] mx-4" />
+                {suggestions.map((s, i) => (
+                  <div
+                    key={s}
+                    className={`flex items-center gap-3 px-4 py-2 cursor-pointer ${i === selIdx ? "bg-[#f8f9fa]" : "hover:bg-[#f8f9fa]"}`}
+                    onMouseDown={() => { setInputVal(s); setShowSugg(false); onSearch(s); }}
+                  >
+                    <Search className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                    <span className="text-sm text-foreground">{s}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
       <div className="flex items-center gap-0 px-4 mt-1" style={{ paddingLeft: "clamp(16px, 6vw, 100px)" }}>

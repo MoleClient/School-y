@@ -12,6 +12,7 @@ import { uvPath } from "@titaniumnetwork-dev/ultraviolet";
 import { epoxyPath } from "@mercuryworkshop/epoxy-transport";
 import { baremuxPath } from "@mercuryworkshop/bare-mux/node";
 import wisp from "wisp-server-node";
+import * as cheerio from 'cheerio';
 
 // Configure Puppeteer with stealth plugin to bypass bot detection
 puppeteer.use(StealthPlugin());
@@ -500,46 +501,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/search", async (req, res) => {
     try {
       const query = req.query.query as string;
-      
-      if (!query) {
-        return res.status(400).json({ error: "Query parameter is required" });
-      }
+      if (!query) return res.status(400).json({ error: "Query parameter is required" });
 
-      const braveApiKey = process.env.BRAVE_SEARCH_API_KEY;
-      const serpApiKey = process.env.SERPAPI_KEY;
       let results;
-
-      if (braveApiKey) {
-        try {
-          results = await fetchBraveSearchResults(query, braveApiKey);
-        } catch (error) {
-          console.warn("Brave search failed, falling back to demo:", error);
-          results = getDemoSearchResults(query);
-        }
-      } else if (serpApiKey) {
-        try {
-          results = await fetchSerpApiResults(query, serpApiKey);
-        } catch (error) {
-          console.warn("SerpAPI search failed, falling back to demo:", error);
-          results = getDemoSearchResults(query);
-        }
-      } else {
+      try {
+        results = await fetchDuckDuckGoResults(query);
+      } catch (error) {
+        console.warn("DuckDuckGo search failed:", error);
         results = getDemoSearchResults(query);
       }
-      
+      if (!results || results.length === 0) results = getDemoSearchResults(query);
+
       const validatedResults = results.map(result => {
-        try {
-          return searchResultSchema.parse(result);
-        } catch (error) {
-          console.error("Invalid result:", result, error);
-          return null;
-        }
+        try { return searchResultSchema.parse(result); } catch { return null; }
       }).filter(Boolean);
-      
+
       res.json(validatedResults);
     } catch (error) {
       console.error("Search error:", error);
       res.status(500).json({ error: "Failed to perform search" });
+    }
+  });
+
+  // Search suggestions autocomplete
+  app.get("/api/search/suggestions", async (req, res) => {
+    try {
+      const q = req.query.q as string;
+      if (!q || q.length < 2) return res.json([]);
+      const r = await fetch(`https://duckduckgo.com/ac/?q=${encodeURIComponent(q)}&type=list`, {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+        signal: AbortSignal.timeout(3000),
+      });
+      const data = await r.json();
+      const suggestions: string[] = Array.isArray(data[1]) ? data[1].slice(0, 8) : [];
+      res.json(suggestions);
+    } catch {
+      res.json([]);
     }
   });
 
@@ -587,35 +584,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const query = req.query.query as string;
       if (!query) return res.status(400).json({ error: "Query required" });
-      const braveApiKey = process.env.BRAVE_SEARCH_API_KEY;
-      if (braveApiKey) {
-        try {
-          const r = await fetch(`https://api.search.brave.com/res/v1/news/search?q=${encodeURIComponent(query)}&count=15`, {
-            headers: { "Accept": "application/json", "Accept-Encoding": "gzip", "X-Subscription-Token": braveApiKey },
-            signal: AbortSignal.timeout(8000),
-          });
-          const data = await r.json();
-          const results = (data.results || []).map((item: any) => ({
-            title: item.title || "",
-            url: item.url || "",
-            description: item.description || "",
-            age: item.age || "",
-            thumbnail: item.thumbnail?.src || "",
-            source: item.meta_url?.hostname?.replace("www.", "") || (item.url ? new URL(item.url).hostname.replace("www.", "") : ""),
-            favicon: item.meta_url?.favicon || "",
-          }));
-          return res.json(results);
-        } catch (e) {
-          console.warn("Brave news search failed:", e);
-        }
+      try {
+        const results = await fetchDuckDuckGoNews(query);
+        if (results.length > 0) return res.json(results);
+      } catch (e) {
+        console.warn("DDG news scrape failed:", e);
       }
-      // Fallback to web search filtered for news
+      // Fallback
       const webResults = getDemoSearchResults(query);
-      const news = webResults.filter(r => {
-        const newsKeywords = ["news", "bbc", "cnn", "nyt", "times", "post", "guardian", "reuters", "ap", "article"];
-        return newsKeywords.some(k => r.url.includes(k) || r.title.toLowerCase().includes(k));
-      });
-      res.json((news.length > 0 ? news : webResults.slice(0, 5)).map(r => ({
+      res.json(webResults.slice(0, 5).map(r => ({
         ...r, age: "Today", thumbnail: "", source: (() => { try { return new URL(r.url).hostname.replace("www.", ""); } catch { return ""; } })()
       })));
     } catch (error) {
@@ -3581,6 +3558,81 @@ async function fetchSerpApiResults(query: string, apiKey: string): Promise<Array
     description: result.snippet || '',
     favicon: result.favicon ? `data:image/png;base64,${result.favicon}` : undefined
   }));
+}
+
+async function fetchDuckDuckGoResults(query: string): Promise<Array<{ title: string; url: string; description: string; favicon?: string }>> {
+  const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+  const response = await fetch(ddgUrl, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept-Encoding': 'gzip, deflate, br',
+    },
+    signal: AbortSignal.timeout(12000),
+  });
+
+  if (!response.ok) throw new Error(`DuckDuckGo returned ${response.status}`);
+  const html = await response.text();
+  const $ = cheerio.load(html);
+  const results: Array<{ title: string; url: string; description: string; favicon?: string }> = [];
+
+  $('.result:not(.result--ad)').each((_, el) => {
+    const titleEl = $(el).find('a.result__a');
+    const title = titleEl.text().trim();
+    let href = titleEl.attr('href') || '';
+    // DuckDuckGo wraps URLs in redirect — extract real URL
+    if (href.includes('uddg=')) {
+      try {
+        const u = new URL('https://duckduckgo.com' + href);
+        href = decodeURIComponent(u.searchParams.get('uddg') || href);
+      } catch {}
+    }
+    if (!href.startsWith('http')) return;
+    const description = $(el).find('.result__snippet').text().trim();
+    if (!title || !href) return;
+    let domain = '';
+    try { domain = new URL(href).hostname.replace('www.', ''); } catch { return; }
+    results.push({
+      title,
+      url: href,
+      description,
+      favicon: `https://www.google.com/s2/favicons?domain=${domain}&sz=32`,
+    });
+  });
+
+  return results.slice(0, 12);
+}
+
+async function fetchDuckDuckGoNews(query: string): Promise<Array<{ title: string; url: string; description: string; source: string; age: string; thumbnail: string; favicon: string }>> {
+  const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query + ' news')}&ia=news`;
+  const response = await fetch(ddgUrl, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!response.ok) throw new Error(`DDG news ${response.status}`);
+  const html = await response.text();
+  const $ = cheerio.load(html);
+  const results: Array<{ title: string; url: string; description: string; source: string; age: string; thumbnail: string; favicon: string }> = [];
+
+  $('.result:not(.result--ad)').each((_, el) => {
+    const titleEl = $(el).find('a.result__a');
+    const title = titleEl.text().trim();
+    let href = titleEl.attr('href') || '';
+    if (href.includes('uddg=')) {
+      try { const u = new URL('https://duckduckgo.com' + href); href = decodeURIComponent(u.searchParams.get('uddg') || href); } catch {}
+    }
+    if (!href.startsWith('http') || !title) return;
+    const description = $(el).find('.result__snippet').text().trim();
+    let domain = '';
+    try { domain = new URL(href).hostname.replace('www.', ''); } catch { return; }
+    results.push({ title, url: href, description, source: domain, age: '', thumbnail: '', favicon: `https://www.google.com/s2/favicons?domain=${domain}&sz=32` });
+  });
+
+  return results.slice(0, 10);
 }
 
 function isPrivateOrLocalAddress(hostname: string): boolean {
