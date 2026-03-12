@@ -157,10 +157,8 @@ export function Homepage({ onSearch, onNavigate }: HomepageProps) {
           </div>
         </div>
 
-        {/* Spring scene fills the rest */}
-        <div className="flex-1 relative overflow-hidden">
-          <SpringScene />
-        </div>
+        {/* Spring scene — SVG fills remaining space naturally */}
+        <SpringScene />
       </div>
 
       <footer className="border-t border-border bg-[#f2f2f2] dark:bg-[#171717]">

@@ -16,294 +16,259 @@ export function SpringScene() {
   const [petals, setPetals] = useState<Petal[]>([]);
 
   useEffect(() => {
-    const generated: Petal[] = Array.from({ length: 28 }, (_, i) => ({
+    setPetals(Array.from({ length: 22 }, (_, i) => ({
       id: i,
       x: Math.random() * 100,
-      size: 6 + Math.random() * 8,
-      delay: Math.random() * 6,
-      duration: 5 + Math.random() * 5,
-      sway: 30 + Math.random() * 60,
+      size: 6 + Math.random() * 7,
+      delay: Math.random() * 7,
+      duration: 6 + Math.random() * 5,
+      sway: 25 + Math.random() * 50,
       color: PETAL_COLORS[Math.floor(Math.random() * PETAL_COLORS.length)],
-    }));
-    setPetals(generated);
+    })));
   }, []);
+
+  // Scene dimensions — everything in one SVG coordinate system
+  const W = 900;
+  const H = 200;
+  const groundY = 158; // y where the ground surface starts
+
+  // Tree helper: trunk bottom is always AT groundY
+  const renderTree = (cx: number, trunkH: number, trunkW: number, canopyRx: number, canopyRy: number, canopyColor1: string, canopyColor2: string, delay: number) => {
+    const trunkTop = groundY - trunkH;
+    const canopyCx = cx;
+    const canopyCy = trunkTop - canopyRy * 0.55;
+    return (
+      <g style={{ animation: `treeSway 4s ease-in-out ${delay}s infinite`, transformOrigin: `${cx}px ${groundY}px` }}>
+        {/* Trunk */}
+        <rect x={cx - trunkW / 2} y={trunkTop} width={trunkW} height={trunkH} rx={trunkW / 2} fill="#795548"
+          style={{ animation: `growUp 1.0s cubic-bezier(.34,1.56,.64,1) ${delay + 0.1}s both`, transformOrigin: `${cx}px ${groundY}px` }} />
+        {/* Canopy shadow */}
+        <ellipse cx={canopyCx + 4} cy={canopyCy + 8} rx={canopyRx * 0.85} ry={canopyRy * 0.6} fill="rgba(0,0,0,0.08)"
+          style={{ animation: `bloomIn 0.8s cubic-bezier(.34,1.56,.64,1) ${delay + 0.7}s both`, transformOrigin: `${canopyCx}px ${canopyCy}px` }} />
+        {/* Main canopy */}
+        <ellipse cx={canopyCx} cy={canopyCy} rx={canopyRx} ry={canopyRy} fill={canopyColor1}
+          style={{ animation: `bloomIn 0.8s cubic-bezier(.34,1.56,.64,1) ${delay + 0.65}s both`, transformOrigin: `${canopyCx}px ${canopyCy}px` }} />
+        {/* Left sub-canopy */}
+        <ellipse cx={canopyCx - canopyRx * 0.55} cy={canopyCy + canopyRy * 0.1} rx={canopyRx * 0.6} ry={canopyRy * 0.7} fill={canopyColor2}
+          style={{ animation: `bloomIn 0.8s cubic-bezier(.34,1.56,.64,1) ${delay + 0.75}s both`, transformOrigin: `${canopyCx}px ${canopyCy}px` }} />
+        {/* Right sub-canopy */}
+        <ellipse cx={canopyCx + canopyRx * 0.55} cy={canopyCy + canopyRy * 0.1} rx={canopyRx * 0.6} ry={canopyRy * 0.7} fill={canopyColor2}
+          style={{ animation: `bloomIn 0.8s cubic-bezier(.34,1.56,.64,1) ${delay + 0.8}s both`, transformOrigin: `${canopyCx}px ${canopyCy}px` }} />
+        {/* Top highlight */}
+        <ellipse cx={canopyCx} cy={canopyCy - canopyRy * 0.3} rx={canopyRx * 0.5} ry={canopyRy * 0.45} fill={canopyColor1} opacity={0.7}
+          style={{ animation: `bloomIn 0.8s cubic-bezier(.34,1.56,.64,1) ${delay + 0.85}s both`, transformOrigin: `${canopyCx}px ${canopyCy}px` }} />
+      </g>
+    );
+  };
+
+  const renderFlower = (fx: number, color: string, centerColor: string, stemH: number, size: number, delay: number) => {
+    const stemTop = groundY - stemH;
+    return (
+      <g style={{ animation: `bloomIn 0.6s cubic-bezier(.34,1.56,.64,1) ${delay}s both`, transformOrigin: `${fx}px ${groundY}px` }}>
+        {/* Stem */}
+        <line x1={fx} y1={groundY} x2={fx} y2={stemTop} stroke="#388E3C" strokeWidth={2} strokeLinecap="round" />
+        {/* Petals */}
+        {[0, 60, 120, 180, 240, 300].map((deg) => {
+          const rad = (deg * Math.PI) / 180;
+          const px = fx + Math.cos(rad) * size * 0.85;
+          const py = stemTop + Math.sin(rad) * size * 0.85;
+          return <ellipse key={deg} cx={px} cy={py} rx={size * 0.55} ry={size * 0.35}
+            fill={color} opacity={0.92}
+            transform={`rotate(${deg}, ${px}, ${py})`} />;
+        })}
+        {/* Center */}
+        <circle cx={fx} cy={stemTop} r={size * 0.45} fill={centerColor} />
+      </g>
+    );
+  };
 
   return (
     <>
       <style>{`
-        @keyframes growTree {
-          0%   { transform: scaleY(0) scaleX(0.4); transform-origin: bottom center; }
-          60%  { transform: scaleY(1.08) scaleX(1.05); transform-origin: bottom center; }
-          80%  { transform: scaleY(0.97) scaleX(0.98); transform-origin: bottom center; }
-          100% { transform: scaleY(1) scaleX(1); transform-origin: bottom center; }
+        @keyframes treeSway {
+          0%, 100% { transform: rotate(0deg); }
+          30%       { transform: rotate(0.7deg); }
+          70%       { transform: rotate(-0.7deg); }
         }
-        @keyframes bloomCanopy {
+        @keyframes growUp {
+          0%   { transform: scaleY(0); }
+          100% { transform: scaleY(1); }
+        }
+        @keyframes bloomIn {
           0%   { transform: scale(0); opacity: 0; }
-          60%  { transform: scale(1.12); opacity: 1; }
-          80%  { transform: scale(0.96); }
+          60%  { transform: scale(1.1); opacity: 1; }
           100% { transform: scale(1); opacity: 1; }
         }
-        @keyframes bloomFlower {
-          0%   { transform: scale(0) rotate(-20deg); opacity: 0; }
-          70%  { transform: scale(1.15) rotate(5deg); opacity: 1; }
-          100% { transform: scale(1) rotate(0deg); opacity: 1; }
-        }
-        @keyframes swayTree {
-          0%, 100% { transform: rotate(0deg); }
-          25%       { transform: rotate(0.8deg); }
-          75%       { transform: rotate(-0.8deg); }
+        @keyframes signSwing {
+          0%, 100% { transform: rotate(-1.2deg); }
+          50%       { transform: rotate(1.2deg); }
         }
         @keyframes petalFall {
-          0%   { transform: translateY(-20px) translateX(0px) rotate(0deg); opacity: 1; }
-          25%  { transform: translateY(25vh) translateX(var(--sway-right)) rotate(90deg); opacity: 0.9; }
-          50%  { transform: translateY(50vh) translateX(0px) rotate(180deg); opacity: 0.7; }
-          75%  { transform: translateY(75vh) translateX(var(--sway-left)) rotate(270deg); opacity: 0.5; }
-          100% { transform: translateY(105vh) translateX(0px) rotate(360deg); opacity: 0; }
-        }
-        @keyframes signSwing {
-          0%, 100% { transform: rotate(-1.5deg); }
-          50%       { transform: rotate(1.5deg); }
-        }
-        @keyframes grassGrow {
-          0%   { transform: scaleY(0); transform-origin: bottom; opacity: 0; }
-          100% { transform: scaleY(1); transform-origin: bottom; opacity: 1; }
-        }
-        @keyframes twinkle {
-          0%, 100% { opacity: 0.6; transform: scale(1); }
-          50%       { opacity: 1;   transform: scale(1.3); }
+          0%   { transform: translateY(0) rotate(0deg); opacity: 1; }
+          100% { transform: translateY(110vh) rotate(360deg); opacity: 0; }
         }
         @keyframes floatBee {
-          0%, 100% { transform: translateY(0px) translateX(0px); }
-          33%       { transform: translateY(-8px) translateX(6px); }
-          66%       { transform: translateY(4px) translateX(-4px); }
+          0%, 100% { transform: translate(0px, 0px); }
+          33%       { transform: translate(5px, -7px); }
+          66%       { transform: translate(-4px, 3px); }
         }
-        @keyframes sunRays {
-          0%, 100% { opacity: 0.3; transform: scale(1) rotate(0deg); }
-          50%       { opacity: 0.6; transform: scale(1.1) rotate(15deg); }
+        @keyframes sunPulse {
+          0%, 100% { transform: scale(1); opacity: 0.9; }
+          50%       { transform: scale(1.05); opacity: 1; }
         }
-        .tree-trunk { animation: growTree 1.2s cubic-bezier(0.34,1.56,0.64,1) both; }
-        .tree-canopy { animation: bloomCanopy 0.9s cubic-bezier(0.34,1.56,0.64,1) both; }
-        .flower     { animation: bloomFlower 0.7s cubic-bezier(0.34,1.56,0.64,1) both; }
-        .tree-sway  { animation: swayTree 4s ease-in-out infinite; transform-origin: bottom center; }
-        .sign-swing { animation: signSwing 3s ease-in-out infinite; transform-origin: top center; }
-        .grass-blade { animation: grassGrow 0.6s ease-out both; }
-        .bee         { animation: floatBee 2.8s ease-in-out infinite; }
-        .sun-rays    { animation: sunRays 3s ease-in-out infinite; }
+        @keyframes grassBlade {
+          0%   { transform: scaleY(0); }
+          100% { transform: scaleY(1); }
+        }
+        .spring-sign { animation: signSwing 3s ease-in-out infinite; transform-box: fill-box; transform-origin: center top; }
+        .bee         { animation: floatBee 2.5s ease-in-out infinite; }
+        .sun         { animation: sunPulse 3s ease-in-out infinite; }
       `}</style>
 
-      {/* Falling petals layer */}
+      {/* Falling petals */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 5 }}>
         {petals.map(p => (
-          <div
-            key={p.id}
-            style={{
-              position: "absolute",
-              left: `${p.x}%`,
-              top: "-20px",
-              width: p.size,
-              height: p.size,
-              borderRadius: "50% 0 50% 0",
-              backgroundColor: p.color,
-              animationName: "petalFall",
-              animationDuration: `${p.duration}s`,
-              animationDelay: `${p.delay}s`,
-              animationTimingFunction: "linear",
-              animationIterationCount: "infinite",
-              animationFillMode: "both",
-              "--sway-right": `${p.sway}px`,
-              "--sway-left": `-${p.sway * 0.7}px`,
-            } as React.CSSProperties}
-          />
+          <div key={p.id} style={{
+            position: "absolute",
+            left: `${p.x}%`,
+            top: "-20px",
+            width: p.size,
+            height: p.size,
+            borderRadius: "50% 0 50% 0",
+            backgroundColor: p.color,
+            animation: `petalFall ${p.duration}s ${p.delay}s linear infinite`,
+          }} />
         ))}
       </div>
 
-      {/* Spring scene container */}
-      <div className="relative w-full overflow-hidden" style={{ height: "100%", minHeight: 180 }}>
+      {/* Main scene — single SVG, single coordinate system */}
+      <div className="w-full" style={{ position: "relative" }}>
+        <svg
+          viewBox={`0 0 ${W} ${H}`}
+          width="100%"
+          style={{ display: "block", overflow: "visible" }}
+          preserveAspectRatio="xMidYMax meet"
+        >
+          {/* Sky gradient */}
+          <defs>
+            <linearGradient id="skyGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="transparent" />
+              <stop offset="70%" stopColor="#e8f5e9" />
+              <stop offset="100%" stopColor="#c8e6c9" />
+            </linearGradient>
+            <linearGradient id="grassGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#7CB342" />
+              <stop offset="100%" stopColor="#558B2F" />
+            </linearGradient>
+          </defs>
 
-        {/* Sky gradient backdrop */}
-        <div className="absolute inset-0" style={{ background: "linear-gradient(to bottom, transparent 0%, #e8f5e9 60%, #c8e6c9 100%)" }} />
+          {/* Sky fill */}
+          <rect x={0} y={0} width={W} height={H} fill="url(#skyGrad)" />
 
-        {/* Sun */}
-        <div className="sun-rays absolute" style={{ top: 12, right: "12%", width: 36, height: 36 }}>
-          <svg viewBox="0 0 60 60" width="36" height="36">
-            <circle cx="30" cy="30" r="13" fill="#FFD700" />
-            {[0,45,90,135,180,225,270,315].map((deg, i) => (
-              <line key={i} x1="30" y1="30"
-                x2={30 + 22 * Math.cos(deg * Math.PI / 180)}
-                y2={30 + 22 * Math.sin(deg * Math.PI / 180)}
-                stroke="#FFD700" strokeWidth="2.5" strokeLinecap="round"
+          {/* Sun */}
+          <g className="sun" style={{ transformOrigin: "810px 28px" }}>
+            {[0, 45, 90, 135, 180, 225, 270, 315].map((deg, i) => (
+              <line key={i}
+                x1={810 + 18 * Math.cos(deg * Math.PI / 180)}
+                y1={28 + 18 * Math.sin(deg * Math.PI / 180)}
+                x2={810 + 30 * Math.cos(deg * Math.PI / 180)}
+                y2={28 + 30 * Math.sin(deg * Math.PI / 180)}
+                stroke="#FFD700" strokeWidth={3} strokeLinecap="round"
               />
             ))}
-          </svg>
-        </div>
+            <circle cx={810} cy={28} r={14} fill="#FFD700" />
+          </g>
 
-        {/* Left cherry blossom tree */}
-        <div className="tree-sway absolute" style={{ left: "6%", bottom: 52, animationDelay: "0.2s" }}>
-          <div className="tree-trunk" style={{ animationDelay: "0.3s" }}>
-            <svg width="60" height="130" viewBox="0 0 60 130">
-              {/* Trunk */}
-              <path d="M28 130 Q26 100 25 80 Q24 60 27 40" stroke="#8D6E63" strokeWidth="9" strokeLinecap="round" fill="none" />
-              {/* Branch left */}
-              <path d="M26 75 Q15 60 8 45" stroke="#8D6E63" strokeWidth="5" strokeLinecap="round" fill="none" />
-              {/* Branch right */}
-              <path d="M27 65 Q38 52 45 38" stroke="#8D6E63" strokeWidth="5" strokeLinecap="round" fill="none" />
-            </svg>
-          </div>
-          {/* Canopy blossoms */}
-          <div className="tree-canopy absolute" style={{ bottom: 82, left: -18, animationDelay: "0.9s" }}>
-            {[
-              { cx: 30, cy: 30, r: 28 }, { cx: 10, cy: 42, r: 22 },
-              { cx: 50, cy: 38, r: 22 }, { cx: 30, cy: 12, r: 20 },
-            ].map((c, i) => (
-              <svg key={i} style={{ position: "absolute", left: c.cx - c.r - 6, top: c.cy - c.r - 6, opacity: 0.92 }} width={c.r * 2 + 12} height={c.r * 2 + 12}>
-                <circle cx={c.r + 6} cy={c.r + 6} r={c.r} fill={i % 2 === 0 ? "#ffb7c5" : "#ffc8d5"} />
-              </svg>
-            ))}
-          </div>
-        </div>
+          {/* ---- TREES (trunk bottom = groundY) ---- */}
 
-        {/* Right cherry blossom tree */}
-        <div className="tree-sway absolute" style={{ right: "6%", bottom: 52, animationDelay: "0.5s" }}>
-          <div className="tree-trunk" style={{ animationDelay: "0.5s" }}>
-            <svg width="60" height="130" viewBox="0 0 60 130">
-              <path d="M32 130 Q34 100 35 80 Q36 60 33 40" stroke="#6D4C41" strokeWidth="9" strokeLinecap="round" fill="none" />
-              <path d="M34 75 Q45 60 52 45" stroke="#6D4C41" strokeWidth="5" strokeLinecap="round" fill="none" />
-              <path d="M33 65 Q22 52 15 38" stroke="#6D4C41" strokeWidth="5" strokeLinecap="round" fill="none" />
-            </svg>
-          </div>
-          <div className="tree-canopy absolute" style={{ bottom: 82, left: -30, animationDelay: "1.1s" }}>
-            {[
-              { cx: 32, cy: 30, r: 28 }, { cx: 52, cy: 42, r: 22 },
-              { cx: 12, cy: 38, r: 22 }, { cx: 32, cy: 12, r: 20 },
-            ].map((c, i) => (
-              <svg key={i} style={{ position: "absolute", left: c.cx - c.r - 6, top: c.cy - c.r - 6, opacity: 0.92 }} width={c.r * 2 + 12} height={c.r * 2 + 12}>
-                <circle cx={c.r + 6} cy={c.r + 6} r={c.r} fill={i % 2 === 0 ? "#ffc8d5" : "#ff9eb5"} />
-              </svg>
-            ))}
-          </div>
-        </div>
+          {/* Far left — cherry blossom (pink) */}
+          {renderTree(80, 90, 12, 44, 34, "#ffb7c5", "#ffd0de", 0.2)}
 
-        {/* Small center tree (green leafy) */}
-        <div className="tree-sway absolute" style={{ left: "50%", transform: "translateX(-50%)", bottom: 52, animationDelay: "0.8s" }}>
-          <div className="tree-trunk" style={{ animationDelay: "0.7s" }}>
-            <svg width="40" height="90" viewBox="0 0 40 90">
-              <path d="M20 90 Q19 70 20 50 Q21 35 20 20" stroke="#795548" strokeWidth="6" strokeLinecap="round" fill="none" />
-            </svg>
-          </div>
-          <div className="tree-canopy absolute" style={{ bottom: 58, left: -28, animationDelay: "1.3s" }}>
-            <svg width="96" height="80" viewBox="0 0 96 80">
-              <ellipse cx="48" cy="44" rx="44" ry="36" fill="#66BB6A" opacity="0.9" />
-              <ellipse cx="28" cy="30" rx="28" ry="24" fill="#81C784" opacity="0.85" />
-              <ellipse cx="68" cy="30" rx="28" ry="24" fill="#4CAF50" opacity="0.85" />
-              <ellipse cx="48" cy="18" rx="24" ry="20" fill="#A5D6A7" opacity="0.85" />
-            </svg>
-          </div>
-        </div>
+          {/* Left-center — green leafy */}
+          {renderTree(220, 70, 10, 34, 28, "#66BB6A", "#81C784", 0.5)}
 
-        {/* Spring Break 2026 sign */}
-        <div className="absolute sign-swing" style={{ left: "50%", transform: "translateX(-50%)", bottom: 52, zIndex: 10, width: 200, animationDelay: "0.2s" }}>
-          {/* Post */}
-          <div style={{ width: 8, height: 40, background: "#8D6E63", margin: "0 auto", borderRadius: 2 }} />
-          {/* Board */}
-          <div style={{
-            background: "linear-gradient(135deg, #F9A825 0%, #FFB300 50%, #F57F17 100%)",
-            border: "4px solid #E65100",
-            borderRadius: 10,
-            padding: "8px 14px",
-            textAlign: "center",
-            boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
-            position: "relative",
-            marginTop: 2,
-          }}>
+          {/* Center — tall cherry blossom */}
+          {renderTree(450, 100, 14, 50, 40, "#f48fb1", "#ffb7c5", 0.8)}
+
+          {/* Right-center — green leafy */}
+          {renderTree(680, 75, 10, 36, 30, "#4CAF50", "#66BB6A", 0.4)}
+
+          {/* Far right — cherry blossom */}
+          {renderTree(820, 85, 12, 42, 32, "#ffc8d5", "#ff9eb5", 0.15)}
+
+          {/* ---- FLOWERS (stem bottom = groundY) ---- */}
+          {renderFlower(145, "#FF5722", "#FFEB3B", 22, 9, 0.9)}
+          {renderFlower(165, "#9C27B0", "#FFF9C4", 18, 8, 1.1)}
+          {renderFlower(185, "#E91E63", "#FFEB3B", 24, 9, 0.7)}
+          {renderFlower(310, "#FF9800", "#FFFFFF", 19, 8, 1.2)}
+          {renderFlower(330, "#2196F3", "#FFF9C4", 21, 8, 0.85)}
+          {renderFlower(560, "#FF5722", "#FFEB3B", 20, 9, 1.0)}
+          {renderFlower(578, "#4CAF50", "#FFEB3B", 17, 7, 0.75)}
+          {renderFlower(740, "#E91E63", "#FFF9C4", 23, 9, 0.95)}
+          {renderFlower(760, "#FF9800", "#FFFFFF", 18, 8, 1.15)}
+
+          {/* ---- GROUND ---- */}
+          {/* Main ground block */}
+          <rect x={0} y={groundY} width={W} height={H - groundY} fill="url(#grassGrad)" />
+
+          {/* Grass bumps along the top of the ground */}
+          <path
+            d={`M0,${groundY} ` + Array.from({ length: 45 }, (_, i) => {
+              const x = (i / 44) * W;
+              const cpX = x + (W / 44) / 2;
+              const cpY = groundY - 10 - Math.sin(i * 2.3) * 4;
+              const endX = x + W / 44;
+              return `Q${cpX},${cpY} ${endX},${groundY}`;
+            }).join(' ') + ` L${W},${H} L0,${H} Z`}
+            fill="#7CB342"
+          />
+
+          {/* Individual grass blades */}
+          {Array.from({ length: 38 }, (_, i) => {
+            const gx = 15 + (i / 37) * (W - 30) + (Math.sin(i * 7.3) * 8);
+            const gh = 12 + Math.abs(Math.sin(i * 3.1)) * 10;
+            const lean = -15 + Math.sin(i * 2.7) * 25;
+            return (
+              <line key={i}
+                x1={gx} y1={groundY}
+                x2={gx + Math.sin(lean * Math.PI / 180) * gh}
+                y2={groundY - gh}
+                stroke="#8BC34A" strokeWidth={2.2} strokeLinecap="round"
+                style={{
+                  animation: `grassBlade 0.5s ease-out ${0.3 + i * 0.025}s both`,
+                  transformOrigin: `${gx}px ${groundY}px`,
+                }}
+              />
+            );
+          })}
+
+          {/* ---- SIGN (centered, post bottom at groundY) ---- */}
+          <g className="spring-sign" style={{ transform: `translateX(${W / 2}px)` }}>
+            {/* Post */}
+            <rect x={-4} y={groundY - 36} width={8} height={36} rx={3} fill="#8D6E63" />
+            {/* Board */}
+            <rect x={-82} y={groundY - 82} width={164} height={50} rx={8} fill="#F9A825" stroke="#E65100" strokeWidth={3} />
             {/* Nail dots */}
-            <div style={{ position: "absolute", top: 6, left: 8, width: 6, height: 6, borderRadius: "50%", background: "#BF360C" }} />
-            <div style={{ position: "absolute", top: 6, right: 8, width: 6, height: 6, borderRadius: "50%", background: "#BF360C" }} />
-            <div style={{ position: "absolute", bottom: 6, left: 8, width: 6, height: 6, borderRadius: "50%", background: "#BF360C" }} />
-            <div style={{ position: "absolute", bottom: 6, right: 8, width: 6, height: 6, borderRadius: "50%", background: "#BF360C" }} />
-            <div style={{ fontSize: 11, fontWeight: 900, color: "#BF360C", letterSpacing: "0.12em", textTransform: "uppercase", lineHeight: 1.1 }}>
-              Spring Break
-            </div>
-            <div style={{ fontSize: 20, fontWeight: 900, color: "#1B5E20", letterSpacing: "0.05em", lineHeight: 1.1, marginTop: 2 }}>
-              2026
-            </div>
-          </div>
-        </div>
+            {[[-72, groundY - 74], [72, groundY - 74], [-72, groundY - 38], [72, groundY - 38]].map(([nx, ny], i) => (
+              <circle key={i} cx={nx} cy={ny} r={3.5} fill="#BF360C" />
+            ))}
+            {/* Text */}
+            <text x={0} y={groundY - 58} textAnchor="middle" fontFamily="Arial, sans-serif" fontWeight="900"
+              fontSize={11} letterSpacing={2} fill="#BF360C">SPRING BREAK</text>
+            <text x={0} y={groundY - 40} textAnchor="middle" fontFamily="Arial, sans-serif" fontWeight="900"
+              fontSize={20} fill="#1B5E20">2026</text>
+          </g>
 
-        {/* Ground flowers */}
-        {[
-          { left: "14%", delay: 0.8, color: "#FF5722", center: "#FFF9C4", size: 20 },
-          { left: "20%", delay: 1.0, color: "#9C27B0", center: "#FFF9C4", size: 16 },
-          { left: "25%", delay: 0.6, color: "#F06292", center: "#FFEB3B", size: 18 },
-          { left: "32%", delay: 1.2, color: "#FF9800", center: "#FFFFFF", size: 15 },
-          { left: "68%", delay: 0.9, color: "#4CAF50", center: "#FFEB3B", size: 16 },
-          { left: "74%", delay: 0.7, color: "#2196F3", center: "#FFFFFF", size: 19 },
-          { left: "80%", delay: 1.1, color: "#E91E63", center: "#FFF9C4", size: 17 },
-          { left: "87%", delay: 0.5, color: "#FF5722", center: "#FFEB3B", size: 21 },
-        ].map((f, i) => (
-          <div
-            key={i}
-            className="flower absolute"
-            style={{ left: f.left, bottom: 52, animationDelay: `${f.delay}s`, zIndex: 6 }}
-          >
-            <svg width={f.size + 8} height={f.size + 8} viewBox="0 0 40 40">
-              {[0, 60, 120, 180, 240, 300].map((deg) => (
-                <ellipse
-                  key={deg}
-                  cx={20 + 10 * Math.cos(deg * Math.PI / 180)}
-                  cy={20 + 10 * Math.sin(deg * Math.PI / 180)}
-                  rx="8" ry="5"
-                  fill={f.color}
-                  opacity="0.9"
-                  transform={`rotate(${deg}, ${20 + 10 * Math.cos(deg * Math.PI / 180)}, ${20 + 10 * Math.sin(deg * Math.PI / 180)})`}
-                />
-              ))}
-              <circle cx="20" cy="20" r="6" fill={f.center} />
-            </svg>
-            {/* Stem */}
-            <svg width={4} height={14} style={{ display: "block", margin: "-2px auto 0" }}>
-              <path d="M2 0 Q3 7 2 14" stroke="#388E3C" strokeWidth="2.5" strokeLinecap="round" fill="none" />
-            </svg>
-          </div>
-        ))}
-
-        {/* Grass ground strip */}
-        <div className="absolute bottom-0 left-0 right-0" style={{ height: 52 }}>
-          <svg width="100%" height="52" viewBox="0 0 800 52" preserveAspectRatio="none">
-            <rect x="0" y="20" width="800" height="32" fill="#558B2F" />
-            <path d="M0 22 Q20 8 40 22 Q60 8 80 22 Q100 8 120 22 Q140 8 160 22 Q180 8 200 22 Q220 8 240 22 Q260 8 280 22 Q300 8 320 22 Q340 8 360 22 Q380 8 400 22 Q420 8 440 22 Q460 8 480 22 Q500 8 520 22 Q540 8 560 22 Q580 8 600 22 Q620 8 640 22 Q660 8 680 22 Q700 8 720 22 Q740 8 760 22 Q780 8 800 22" fill="#689F38" />
-          </svg>
-          {/* Grass blades */}
-          {Array.from({ length: 32 }, (_, i) => (
-            <div
-              key={i}
-              className="grass-blade absolute bottom-5"
-              style={{
-                left: `${(i / 32) * 100 + Math.random() * 2.5}%`,
-                animationDelay: `${0.4 + i * 0.04}s`,
-                width: 3,
-                height: 10 + Math.random() * 8,
-                background: "#7CB342",
-                borderRadius: "2px 2px 0 0",
-                transform: `rotate(${-15 + Math.random() * 30}deg)`,
-                transformOrigin: "bottom center",
-              }}
-            />
-          ))}
-        </div>
-
-        {/* Bee */}
-        <div className="bee absolute" style={{ left: "42%", bottom: 155, zIndex: 8, animationDelay: "1s" }}>
-          <svg width="20" height="14" viewBox="0 0 20 14">
-            <ellipse cx="10" cy="8" rx="8" ry="5" fill="#FFD600" />
-            <rect x="5" y="6" width="3" height="6" rx="1" fill="#212121" opacity="0.6" />
-            <rect x="9" y="6" width="3" height="6" rx="1" fill="#212121" opacity="0.6" />
-            <rect x="13" y="6" width="3" height="6" rx="1" fill="#212121" opacity="0.6" />
-            <ellipse cx="7" cy="4" rx="5" ry="3" fill="white" opacity="0.7" />
-            <ellipse cx="13" cy="4" rx="5" ry="3" fill="white" opacity="0.7" />
-            <circle cx="10" cy="7" r="3" fill="#212121" opacity="0.15" />
-          </svg>
-        </div>
-
+          {/* ---- BEE ---- */}
+          <g className="bee" style={{ transformOrigin: "390px 95px" }}>
+            <ellipse cx={390} cy={97} rx={9} ry={6} fill="#FFD600" />
+            <rect x={383} y={95} width={3} height={7} rx={1} fill="#212121" opacity={0.6} />
+            <rect x={388} y={95} width={3} height={7} rx={1} fill="#212121" opacity={0.6} />
+            <rect x={393} y={95} width={3} height={7} rx={1} fill="#212121" opacity={0.6} />
+            <ellipse cx={385} cy={92} rx={6} ry={3.5} fill="white" opacity={0.75} />
+            <ellipse cx={395} cy={92} rx={6} ry={3.5} fill="white" opacity={0.75} />
+          </g>
+        </svg>
       </div>
     </>
   );
