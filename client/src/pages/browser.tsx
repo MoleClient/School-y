@@ -9,7 +9,8 @@ export type BrowserView = "home" | "search" | "webpage";
 export default function Browser() {
   const [view, setView] = useState<BrowserView>("home");
   const [searchQuery, setSearchQuery] = useState("");
-  const [currentUrl, setCurrentUrl] = useState("");
+  // proxyTargetUrl: the URL we actually load in the iframe (doesn't change on SPA navigation)
+  const [proxyTargetUrl, setProxyTargetUrl] = useState("");
   const [prevView, setPrevView] = useState<BrowserView>("home");
   const [prevQuery, setPrevQuery] = useState("");
 
@@ -25,19 +26,24 @@ export default function Browser() {
   const handleResultClick = useCallback((result: SearchResult) => {
     setPrevView(view);
     setPrevQuery(searchQuery);
-    setCurrentUrl(result.url);
+    setProxyTargetUrl(result.url);
     setView("webpage");
   }, [view, searchQuery]);
 
   const handleNavigateToUrl = useCallback((url: string) => {
     setPrevView(view);
     setPrevQuery(searchQuery);
-    setCurrentUrl(url);
+    setProxyTargetUrl(url);
     setView("webpage");
   }, [view, searchQuery]);
 
-  const handleIframeUrlChange = useCallback((newUrl: string) => {
-    setCurrentUrl(newUrl);
+  // Only updates displayed URL — does NOT reload the iframe.
+  // The iframe already navigated internally; we just track the new URL.
+  const handleIframeNavigation = useCallback((newUrl: string) => {
+    // No-op: we intentionally do NOT push this back into proxyTargetUrl.
+    // Changing proxyTargetUrl would rebuild proxyUrl and reload the iframe.
+    // The iframe handles its own SPA navigation — we just let it run.
+    void newUrl;
   }, []);
 
   const handleBackFromWebpage = useCallback(() => {
@@ -51,7 +57,6 @@ export default function Browser() {
 
   return (
     <div className="h-screen w-screen bg-background flex flex-col overflow-hidden">
-      {/* Floating back button when in webpage view */}
       {view === "webpage" && (
         <button
           onClick={handleBackFromWebpage}
@@ -75,7 +80,7 @@ export default function Browser() {
             onSearch={handleSearch}
           />
         ) : (
-          <WebpageViewer url={currentUrl} onUrlChange={handleIframeUrlChange} />
+          <WebpageViewer url={proxyTargetUrl} onUrlChange={handleIframeNavigation} />
         )}
       </div>
     </div>

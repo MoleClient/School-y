@@ -1165,23 +1165,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
     notifyParent(location.pathname);
   }, 100);
   
-  // MutationObserver to catch dynamically added links
+  // Helper to proxy a resource URL
+  function proxyResource(src) {
+    if (!src || src.startsWith('/api/r?') || src.startsWith('/b/') || src.startsWith('data:') || src.startsWith('blob:') || src.startsWith('javascript:')) return src;
+    var abs = src;
+    if (src.startsWith('//')) abs = 'https:' + src;
+    else if (src.startsWith('/')) abs = B + src;
+    else if (!src.match(/^https?:\\/\\//)) abs = B + '/' + src;
+    return '/api/r?u=' + encodeURIComponent(abs);
+  }
+
+  // Rewrite images/sources on a given element and its descendants
+  function rewriteMediaNodes(root) {
+    var tags = root.querySelectorAll ? root.querySelectorAll('img, source, video[src], audio[src]') : [];
+    for (var i = 0; i < tags.length; i++) {
+      var el = tags[i];
+      var src = el.getAttribute('src');
+      if (src) { var p = proxyResource(src); if (p !== src) el.setAttribute('src', p); }
+      var srcset = el.getAttribute('srcset');
+      if (srcset) {
+        var newSrcset = srcset.replace(/([^,\\s]+)(\\s+[^,]+)?/g, function(m, url, descriptor) {
+          return proxyResource(url) + (descriptor || '');
+        });
+        if (newSrcset !== srcset) el.setAttribute('srcset', newSrcset);
+      }
+    }
+    // Handle the root element itself
+    if (root.tagName === 'IMG' || root.tagName === 'SOURCE') {
+      var src = root.getAttribute('src');
+      if (src) { var p = proxyResource(src); if (p !== src) root.setAttribute('src', p); }
+    }
+  }
+
+  // MutationObserver to catch dynamically added links and images
   var observer = new MutationObserver(function(mutations) {
     mutations.forEach(function(mutation) {
       mutation.addedNodes.forEach(function(node) {
         if (node.nodeType === 1) {
+          // Fix target attributes on links
           var links = node.querySelectorAll ? node.querySelectorAll('a[target="_blank"], a[target="_top"], a[target="_parent"]') : [];
-          for (var i = 0; i < links.length; i++) {
-            links[i].removeAttribute('target');
-          }
+          for (var i = 0; i < links.length; i++) { links[i].removeAttribute('target'); }
           if (node.tagName === 'A' && (node.target === '_blank' || node.target === '_top' || node.target === '_parent')) {
             node.removeAttribute('target');
           }
+          // Proxy dynamically added images
+          rewriteMediaNodes(node);
         }
       });
+      // Also catch attribute changes (e.g. lazy-loaded images getting src set)
+      if (mutation.type === 'attributes') {
+        var el = mutation.target;
+        if (el.nodeType === 1 && (mutation.attributeName === 'src' || mutation.attributeName === 'srcset')) {
+          var src = el.getAttribute('src');
+          if (src) { var p = proxyResource(src); if (p !== src) el.setAttribute('src', p); }
+        }
+      }
     });
   });
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+  observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'srcset', 'data-src'] });
 })();
 </script>`;
 

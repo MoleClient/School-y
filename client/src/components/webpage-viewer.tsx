@@ -19,32 +19,9 @@ interface WebpageViewerProps {
   onUrlChange?: (newUrl: string) => void;
 }
 
-const REMOTE_BROWSER_SITES = [
-  'chatgpt.com',
-  'claude.ai',
-  'openai.com',
-  'anthropic.com',
-  'discord.com',
-  'slack.com',
-  'notion.so',
-  'figma.com',
-  'canva.com',
-  'docs.google.com',
-  'drive.google.com',
-  'mail.google.com',
-  'outlook.live.com',
-  'office.com',
-  'github.com',
-  'reddit.com',
-  'twitter.com',
-  'x.com',
-  'instagram.com',
-  'facebook.com',
-  'tiktok.com',
-  'netflix.com',
-  'linkedin.com',
-  'twitch.tv',
-];
+// Remote browser disabled — unreliable in Replit environment.
+// All sites use the legacy /b/ proxy with error fallback.
+const REMOTE_BROWSER_SITES: string[] = [];
 
 // XOR key for URL obfuscation (must match server)
 const OBFUSCATION_KEY = 0x5A;
