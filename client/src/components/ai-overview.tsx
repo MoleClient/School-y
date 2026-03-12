@@ -81,7 +81,7 @@ interface AIOverviewProps {
 
 export function AIOverview({ query, results, onResultClick }: AIOverviewProps) {
   const [apiKey, setApiKey] = useState<string | null>(() => localStorage.getItem(STORAGE_KEY));
-  const [showDialog, setShowDialog] = useState(false);
+  const [showDialog, setShowDialog] = useState(() => !localStorage.getItem(STORAGE_KEY));
   const [summary, setSummary] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

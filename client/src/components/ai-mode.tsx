@@ -266,8 +266,8 @@ ${context ? `${context}\n\n` : ""}When citing sources, use markdown links like [
   }
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-auto">
+    <div className="flex flex-col h-full" style={{ background: "#fff" }}>
+      <div className="flex-1 overflow-auto" style={{ background: "#fff" }}>
         <div className="max-w-[760px] mx-auto px-4 py-6 space-y-6">
           {messages.map((msg, i) => (
             <div key={i} className={msg.role === "user" ? "flex justify-end" : "flex justify-start"}>
@@ -277,7 +277,7 @@ ${context ? `${context}\n\n` : ""}When citing sources, use markdown links like [
                     <GeminiSparkle size={18} />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm text-foreground leading-relaxed">
+                    <div className="text-sm leading-relaxed" style={{ color: "#202124" }}>
                       <MarkdownMessage content={msg.content} onResultClick={onResultClick} />
                     </div>
                     {msg.sources && msg.sources.length > 0 && (
@@ -333,10 +333,10 @@ ${context ? `${context}\n\n` : ""}When citing sources, use markdown links like [
         </div>
       </div>
 
-      <div className="border-t border-border px-4 py-3 bg-background">
+      <div className="border-t border-border px-4 py-3" style={{ background: "#fff" }}>
         <div className="max-w-[760px] mx-auto">
           <form onSubmit={handleSubmit} className="flex items-end gap-2">
-            <div className="flex-1 rounded-2xl border border-border bg-background overflow-hidden">
+            <div className="flex-1 rounded-2xl overflow-hidden" style={{ border: "1.5px solid #dfe1e5", background: "#fff", boxShadow: "0 1px 6px rgba(32,33,36,0.1)" }}>
               <textarea
                 ref={inputRef}
                 value={input}
@@ -349,8 +349,8 @@ ${context ? `${context}\n\n` : ""}When citing sources, use markdown links like [
                 placeholder="Ask a follow-up question..."
                 rows={1}
                 disabled={isStreaming}
-                className="w-full px-4 py-3 text-sm bg-transparent outline-none resize-none text-foreground placeholder:text-muted-foreground disabled:opacity-50"
-                style={{ maxHeight: "120px" }}
+                className="w-full px-4 py-3 text-sm outline-none resize-none disabled:opacity-50"
+                style={{ background: "#fff", color: "#202124", maxHeight: "120px" }}
                 data-testid="input-ai-message"
               />
             </div>
