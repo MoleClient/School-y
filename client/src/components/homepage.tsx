@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, KeyboardEvent } from "react";
 import { Search } from "lucide-react";
 import { SchoolyLogo } from "./schooly-logo";
 import { LuckyWheel } from "./lucky-wheel";
+import { SpringScene } from "./spring-scene";
 
 interface HomepageProps {
   onSearch: (query: string) => void;
@@ -92,65 +93,73 @@ export function Homepage({ onSearch, onNavigate }: HomepageProps) {
         <a href="#" className="text-[13px] text-foreground/80 hover:underline">Store</a>
       </header>
 
-      <div className="flex-1 flex flex-col items-center justify-center -mt-16">
-        <div className="mb-8">
-          <SchoolyLogo size="large" />
-        </div>
+      <div className="flex-1 flex flex-col">
+        {/* Search area — centered in top portion */}
+        <div className="flex flex-col items-center justify-center" style={{ flex: "0 0 auto", paddingTop: "clamp(32px, 8vh, 80px)", paddingBottom: 16 }}>
+          <div className="mb-8">
+            <SchoolyLogo size="large" />
+          </div>
 
-        <div className="w-full max-w-[584px] px-4">
-          <div ref={containerRef} className="relative">
-            <div
-              className={`flex items-center border border-[#dfe1e5] shadow-sm hover:shadow-md transition-shadow px-5 py-3 gap-3 bg-background ${isOpen ? "rounded-t-2xl border-b-transparent shadow-md" : "rounded-full"}`}
-            >
-              <Search className="h-5 w-5 text-muted-foreground flex-shrink-0" />
-              <input
-                type="text"
-                value={searchValue}
-                onChange={(e) => handleChange(e.target.value)}
-                onKeyDown={handleKeyDown}
-                onFocus={() => { if (suggestions.length > 0) setShowSuggestions(true); }}
-                placeholder="Search the web or enter a URL"
-                className="flex-1 bg-transparent outline-none text-base text-foreground placeholder:text-muted-foreground"
-                data-testid="input-homepage-search"
-                autoFocus
-                autoComplete="off"
-              />
+          <div className="w-full max-w-[584px] px-4">
+            <div ref={containerRef} className="relative">
+              <div
+                className={`flex items-center border border-[#dfe1e5] shadow-sm hover:shadow-md transition-shadow px-5 py-3 gap-3 bg-background ${isOpen ? "rounded-t-2xl border-b-transparent shadow-md" : "rounded-full"}`}
+              >
+                <Search className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+                <input
+                  type="text"
+                  value={searchValue}
+                  onChange={(e) => handleChange(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  onFocus={() => { if (suggestions.length > 0) setShowSuggestions(true); }}
+                  placeholder="Search the web or enter a URL"
+                  className="flex-1 bg-transparent outline-none text-base text-foreground placeholder:text-muted-foreground"
+                  data-testid="input-homepage-search"
+                  autoFocus
+                  autoComplete="off"
+                />
+              </div>
+
+              {/* Suggestions dropdown */}
+              {isOpen && (
+                <div className="absolute top-full left-0 right-0 bg-background border border-[#dfe1e5] border-t-0 rounded-b-2xl shadow-md z-50 overflow-hidden">
+                  <div className="h-px bg-[#e8eaed] mx-4" />
+                  {suggestions.map((s, i) => (
+                    <div
+                      key={s}
+                      className={`flex items-center gap-3 px-5 py-2.5 cursor-pointer ${i === selectedIdx ? "bg-[#f8f9fa]" : "hover:bg-[#f8f9fa]"}`}
+                      onMouseDown={() => pickSuggestion(s)}
+                    >
+                      <Search className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                      <span className="text-sm text-foreground">{s}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {/* Suggestions dropdown */}
-            {isOpen && (
-              <div className="absolute top-full left-0 right-0 bg-background border border-[#dfe1e5] border-t-0 rounded-b-2xl shadow-md z-50 overflow-hidden">
-                <div className="h-px bg-[#e8eaed] mx-4" />
-                {suggestions.map((s, i) => (
-                  <div
-                    key={s}
-                    className={`flex items-center gap-3 px-5 py-2.5 cursor-pointer ${i === selectedIdx ? "bg-[#f8f9fa]" : "hover:bg-[#f8f9fa]"}`}
-                    onMouseDown={() => pickSuggestion(s)}
-                  >
-                    <Search className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                    <span className="text-sm text-foreground">{s}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+            <div className="flex items-center justify-center gap-3 mt-7">
+              <button
+                onClick={() => navigate(searchValue)}
+                className="px-4 py-2 text-sm bg-[#f8f9fa] text-[#3c4043] rounded-md border border-[#f8f9fa] hover:border-[#dadce0] hover:shadow-sm transition-all dark:bg-[#303134] dark:text-[#e8eaed] dark:border-[#303134] dark:hover:border-[#5f6368]"
+                data-testid="button-schooly-search"
+              >
+                School-y Search
+              </button>
+              <button
+                onClick={() => setShowWheel(true)}
+                className="px-4 py-2 text-sm bg-[#f8f9fa] text-[#3c4043] rounded-md border border-[#f8f9fa] hover:border-[#dadce0] hover:shadow-sm transition-all dark:bg-[#303134] dark:text-[#e8eaed] dark:border-[#303134] dark:hover:border-[#5f6368]"
+                data-testid="button-feeling-lucky"
+              >
+                I'm Feeling Lucky
+              </button>
+            </div>
           </div>
+        </div>
 
-          <div className="flex items-center justify-center gap-3 mt-7">
-            <button
-              onClick={() => navigate(searchValue)}
-              className="px-4 py-2 text-sm bg-[#f8f9fa] text-[#3c4043] rounded-md border border-[#f8f9fa] hover:border-[#dadce0] hover:shadow-sm transition-all dark:bg-[#303134] dark:text-[#e8eaed] dark:border-[#303134] dark:hover:border-[#5f6368]"
-              data-testid="button-schooly-search"
-            >
-              School-y Search
-            </button>
-            <button
-              onClick={() => setShowWheel(true)}
-              className="px-4 py-2 text-sm bg-[#f8f9fa] text-[#3c4043] rounded-md border border-[#f8f9fa] hover:border-[#dadce0] hover:shadow-sm transition-all dark:bg-[#303134] dark:text-[#e8eaed] dark:border-[#303134] dark:hover:border-[#5f6368]"
-              data-testid="button-feeling-lucky"
-            >
-              I'm Feeling Lucky
-            </button>
-          </div>
+        {/* Spring scene fills the rest */}
+        <div className="flex-1 relative overflow-hidden">
+          <SpringScene />
         </div>
       </div>
 
