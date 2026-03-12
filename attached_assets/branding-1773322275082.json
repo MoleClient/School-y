@@ -1,0 +1,138 @@
+{
+  "colorScheme": "light",
+  "fonts": [
+    {
+      "family": "Roboto",
+      "role": "body"
+    },
+    {
+      "family": "Google Sans",
+      "role": "heading"
+    },
+    {
+      "family": "Arial",
+      "role": "body"
+    }
+  ],
+  "colors": {
+    "primary": "#0B57D0",
+    "accent": "#1A73E8",
+    "background": "#FFFFFF",
+    "textPrimary": "#1F1F1F",
+    "link": "#1A73E8"
+  },
+  "typography": {
+    "fontFamilies": {
+      "primary": "Roboto",
+      "heading": "Google Sans"
+    },
+    "fontStacks": {
+      "heading": [
+        "Roboto",
+        "Arial",
+        "sans-serif"
+      ],
+      "body": [
+        "Roboto",
+        "Arial",
+        "sans-serif"
+      ],
+      "paragraph": [
+        "Roboto",
+        "Arial",
+        "sans-serif"
+      ]
+    },
+    "fontSizes": {
+      "h1": "14px",
+      "h2": "14px",
+      "body": "14px"
+    }
+  },
+  "spacing": {
+    "baseUnit": 4,
+    "borderRadius": "16px"
+  },
+  "components": {
+    "input": {
+      "background": "transparent",
+      "textColor": "#212121",
+      "borderColor": null,
+      "borderRadius": "0px",
+      "borderRadiusCorners": {
+        "topLeft": "0px",
+        "topRight": "0px",
+        "bottomRight": "0px",
+        "bottomLeft": "0px"
+      },
+      "shadow": "none"
+    },
+    "buttonPrimary": {
+      "background": "#F8F9FA",
+      "textColor": "#3C4043",
+      "borderColor": "#F8F9FA",
+      "borderRadius": "8px",
+      "borderRadiusCorners": {
+        "topLeft": "8px",
+        "topRight": "8px",
+        "bottomRight": "8px",
+        "bottomLeft": "8px"
+      },
+      "shadow": "none"
+    }
+  },
+  "images": {
+    "favicon": "https://www.gstatic.com/images/branding/searchlogo/ico/favicon.ico",
+    "ogImage": null
+  },
+  "__llm_logo_reasoning": {
+    "selectedIndex": -1,
+    "reasoning": "No visible logo candidate matches the brand 'Google' as the provided candidate is invisible. Google's logo is typically visible and prominent.",
+    "confidence": 0.2,
+    "rejected": true,
+    "source": "llm"
+  },
+  "__llm_button_reasoning": {
+    "primary": {
+      "index": 2,
+      "text": "Google Search",
+      "reasoning": "Button #2 'Google Search' is a primary action on Google's homepage, typically used for initiating a search, which is the main function of the site. It has a distinct blue background, aligning with Google's brand colors."
+    },
+    "secondary": {
+      "index": 1,
+      "text": "I'm Feeling Lucky",
+      "reasoning": "Button #1 'I'm Feeling Lucky' is a secondary action, offering an alternative search experience. It shares the same color group but serves a less prominent role."
+    },
+    "confidence": 0.95
+  },
+  "personality": {
+    "tone": "minimalist",
+    "energy": "medium",
+    "targetAudience": "general public"
+  },
+  "designSystem": {
+    "framework": "custom",
+    "componentLibrary": ""
+  },
+  "confidence": {
+    "buttons": 0.95,
+    "colors": 0.9,
+    "overall": 0.925
+  },
+  "__llm_metadata": {
+    "logoSelection": {
+      "llmCalled": true,
+      "llmSucceeded": true,
+      "finalSource": "llm",
+      "rawLogoSelection": {
+        "selectedLogoIndex": -1,
+        "selectedLogoReasoning": "No visible logo candidate matches the brand 'Google' as the provided candidate is invisible. Google's logo is typically visible and prominent.",
+        "confidence": 0.2
+      }
+    },
+    "buttonClassification": {
+      "llmCalled": true,
+      "llmSucceeded": true
+    }
+  }
+}

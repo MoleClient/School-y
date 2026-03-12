@@ -1,52 +1,51 @@
-# School-y - Opera GX-Inspired Web Browser Platform
+# School-y - Google-Inspired Web Browser Platform
 
-A powerful gaming-inspired web browser for bypassing school content filters, featuring Opera GX aesthetics with neon accents on a dark theme.
+A web browser platform designed to look like Google's homepage, featuring a clean search interface with actual search results and an embedded webpage viewer.
 
 ## Features
 
-- **Password Authentication**: Universal password protection with IP-based session persistence
-- **Opera GX Gaming UI**: Dark charcoal theme with neon red/pink accents, glassmorphism effects, and bold typography
-- **Web Search**: Real-time web search with support for multiple search providers (DuckDuckGo-style centered interface)
+- **Google-Style Homepage**: Clean white design with centered Google logo, rounded search bar, and "Google Search" / "I'm Feeling Lucky" buttons
+- **Real Search Results**: Google-style search results layout with favicons, blue titles, green URLs, and descriptions
+- **Beta AI Overview**: AI-powered search summary panel (requires API key + model name configuration)
 - **Embedded Webpage Viewer**: View websites without redirecting using advanced iframe + proxy technology
-- **URL Synchronization**: Address bar updates in real-time as you click links within pages
-- **Navigation Controls**: Full browser history with back, forward, and reload functionality
+- **No Authentication**: Direct access with no password block
 - **URL Obfuscation**: Domain names are XOR-encoded and base64-encoded to evade content filter detection
 - **Video Streaming**: Range header support for YouTube and other video sites with chunked transfer
 - **Real-time Support**: WebSocket tunneling and SSE proxy for chat apps, live updates, and streaming content
-- **Asset Caching**: In-memory caching for static assets (JS, CSS, fonts, images) with ETag support
-- **Responsive Design**: Works on desktop, tablet, and mobile devices
+- **Remote Browser**: Puppeteer-based fallback for complex SPAs (ChatGPT, Claude, Discord, etc.)
 
 ## Design Theme
 
-The application uses an Opera GX-inspired gaming aesthetic:
-- **Primary Color**: Neon Red/Pink `hsl(345, 95%, 55%)` / `#FA1E4E`
-- **Background**: Deep Charcoal `hsl(270, 20%, 6%)` / `#121019`
-- **Effects**: Glassmorphism, neon glow, gradient backgrounds
-- **Typography**: Bold, uppercase section headers with tracking
+The application uses a Google-inspired clean design:
+- **Primary Color**: Google Blue `hsl(215, 89%, 43%)` / `#0B57D0`
+- **Background**: White `#FFFFFF`
+- **Typography**: Arial/Roboto, clean and minimal
+- **Search Bar**: Rounded pill shape with subtle border and shadow
+- **Results Page**: Left-aligned single column, Google-style result cards
 
 ## Architecture
 
 ### Frontend
 - React SPA with Wouter routing
-- Shadcn UI components with Opera GX custom styling
+- Shadcn UI components with Google-style custom styling
 - TanStack Query for data fetching and caching
-- Tailwind CSS with gaming-inspired design tokens (glassmorphism, neon-glow utilities)
+- Tailwind CSS with clean light theme
 
 ### Backend
 - Express.js server
-- Search API integration (Brave Search or SerpAPI)
+- Search API integration (Brave Search or SerpAPI, with demo fallback)
 - **Ultraviolet Proxy** for SPAs (React apps like ChatGPT)
 - Legacy CORS proxy fallback for simpler sites
+- Remote browser (Puppeteer) for complex SPAs
 - In-memory storage for browser history
 
 ### Proxy System
-The browser uses two proxy methods:
-1. **Ultraviolet (UV) Proxy** - Primary method for modern SPAs. Uses service worker at `/service/` with epoxy transport via wisp WebSocket. Handles client-side routing properly.
-2. **Legacy Proxy** - Fallback at `/b/` path for when UV isn't available. Works for simpler sites but may break SPAs.
+The browser uses multiple proxy methods:
+1. **Ultraviolet (UV) Proxy** - Primary method for modern SPAs. Uses service worker at `/service/` with epoxy transport via wisp WebSocket.
+2. **Legacy Proxy** - Fallback at `/b/` path for simpler sites.
+3. **Remote Browser** - Puppeteer-based screenshot streaming via WebSocket for complex SPAs that block proxies.
 
 ## Search Configuration
-
-School-y supports real web search through two providers:
 
 ### Option 1: Brave Search API (Recommended)
 1. Get a free API key from [Brave Search API](https://brave.com/search/api/)
@@ -57,16 +56,12 @@ School-y supports real web search through two providers:
 2. Add to your environment: `SERPAPI_KEY=your_key_here`
 
 ### Demo Mode
-Without API keys, School-y runs in demo mode with curated search results featuring popular websites. This provides a good experience for testing and development.
+Without API keys, School-y runs in demo mode with curated search results.
 
-## Authentication
-
-School-y uses a simple password-based authentication system:
-- **Universal Password**: `Unblocked123`
-- **Session Persistence**: IP-based (once authenticated, your IP is remembered)
-- **Sign In Page**: `/signin` - styled with Opera GX gaming theme
-
-Once you enter the correct password, your IP is stored and you won't need to sign in again.
+## AI Overview (Beta)
+The search results page includes a "Beta AI Overview" section that will display AI-generated summaries. User needs to provide:
+- API key
+- Model name
 
 ## Security
 
@@ -78,35 +73,15 @@ The proxy endpoint includes several security measures:
 
 ## Development
 
-The application runs on port 5000 with hot module replacement enabled for rapid development.
-
 ```bash
 npm run dev
 ```
 
+Runs on port 5000 with hot module replacement enabled.
+
 ## User Experience
 
-1. **Search**: Enter a query in the address bar to see search results
-2. **Browse**: Click any result to view the website embedded in the browser
-3. **Navigate**: Use back/forward buttons to navigate through history
-4. **Reload**: Refresh the current page while preserving query parameters
-5. **Direct URLs**: Enter a URL directly in the address bar to visit any website
-
-## Smart Bypass System
-
-When sites block standard proxy access, School-y uses multiple intelligent bypass strategies:
-
-1. **Mobile User Agent** - Fetches pages as a mobile device (lighter protection on some sites)
-2. **Google Cache** - Retrieves Google's cached version of the page
-3. **Wayback Machine** - Gets archived snapshots from Archive.org
-4. **Google Translate Proxy** - Routes through Google's translation servers
-5. **Enhanced Puppeteer** - Stealth browser with fingerprint randomization and human-like behavior
-
-The "Bypass" button activates these strategies automatically in sequence until one succeeds.
-
-## Known Limitations
-
-- Some websites prevent iframe embedding for security reasons (X-Frame-Options)
-- Demo search results are curated and limited without API keys
-- Proxy functionality is educational and not intended for production use at scale
-- Sites with aggressive Cloudflare Turnstile may still block access (try Wayback/Google Cache buttons)
+1. **Homepage**: Google-style landing page with centered search bar
+2. **Search**: Type a query to see real search results with AI Overview
+3. **Browse**: Click any result to view the website embedded in the browser
+4. **Direct URLs**: Enter a URL directly in the search bar to visit any website

@@ -421,28 +421,7 @@ function cleanCache() {
   }
 }
 
-const UNIVERSAL_PASSWORD = "Unblocked123";
-
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Authentication endpoints
-  app.get("/api/auth/status", (req, res) => {
-    const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
-    const isAuthenticated = storage.isIpAuthenticated(clientIp);
-    res.json({ authenticated: isAuthenticated });
-  });
-  
-  app.post("/api/auth/login", (req, res) => {
-    const { password } = req.body;
-    const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
-    
-    if (password === UNIVERSAL_PASSWORD) {
-      storage.authenticateIp(clientIp);
-      res.json({ success: true });
-    } else {
-      res.status(401).json({ success: false, error: "Invalid password" });
-    }
-  });
-
   app.get("/api/search", async (req, res) => {
     try {
       const query = req.query.query as string;

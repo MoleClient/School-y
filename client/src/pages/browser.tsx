@@ -1,5 +1,4 @@
-import { useState } from "react";
-import { BrowserChrome } from "@/components/browser-chrome";
+import { useState, useCallback } from "react";
 import { SearchResults } from "@/components/search-results";
 import { WebpageViewer } from "@/components/webpage-viewer";
 import { Homepage } from "@/components/homepage";
@@ -14,90 +13,44 @@ export default function Browser() {
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
 
-  const handleSearch = (query: string) => {
+  const handleSearch = useCallback((query: string) => {
     setSearchQuery(query);
     setView("search");
-  };
+  }, []);
 
-  const handleResultClick = (result: SearchResult) => {
+  const handleResultClick = useCallback((result: SearchResult) => {
     const newHistory = [...history.slice(0, historyIndex + 1), result.url];
     setHistory(newHistory);
     setHistoryIndex(newHistory.length - 1);
     setCurrentUrl(result.url);
     setView("webpage");
-  };
+  }, [history, historyIndex]);
 
-  const handleNavigateToUrl = (url: string) => {
+  const handleNavigateToUrl = useCallback((url: string) => {
     const newHistory = [...history.slice(0, historyIndex + 1), url];
     setHistory(newHistory);
     setHistoryIndex(newHistory.length - 1);
     setCurrentUrl(url);
     setView("webpage");
-  };
+  }, [history, historyIndex]);
 
-  const handleBack = () => {
-    if (historyIndex > 0) {
-      const newIndex = historyIndex - 1;
-      setHistoryIndex(newIndex);
-      setCurrentUrl(history[newIndex]);
-      setView("webpage");
-    }
-  };
-
-  const handleForward = () => {
-    if (historyIndex < history.length - 1) {
-      const newIndex = historyIndex + 1;
-      setHistoryIndex(newIndex);
-      setCurrentUrl(history[newIndex]);
-      setView("webpage");
-    }
-  };
-
-  const handleReload = () => {
-    if (view === "webpage" && currentUrl) {
-      const url = new URL(currentUrl);
-      url.searchParams.set('_reload', Date.now().toString());
-      setCurrentUrl(url.toString());
-    }
-  };
-
-  // Handle URL changes from iframe navigation (clicking links within pages)
-  const handleIframeUrlChange = (newUrl: string) => {
-    // Update the current URL without adding to history (iframe already navigated)
-    // This keeps the address bar in sync with what's displayed
+  const handleIframeUrlChange = useCallback((newUrl: string) => {
     setCurrentUrl(newUrl);
-    
-    // Update history to reflect the new URL
     const newHistory = [...history.slice(0, historyIndex + 1), newUrl];
     setHistory(newHistory);
     setHistoryIndex(newHistory.length - 1);
-  };
-
-  const canGoBack = historyIndex > 0;
-  const canGoForward = historyIndex < history.length - 1;
+  }, [history, historyIndex]);
 
   return (
     <div className="h-screen w-screen bg-background flex flex-col overflow-hidden">
-      <BrowserChrome
-        currentUrl={currentUrl}
-        searchQuery={searchQuery}
-        onSearch={handleSearch}
-        onNavigate={handleNavigateToUrl}
-        onBack={handleBack}
-        onForward={handleForward}
-        onReload={handleReload}
-        canGoBack={canGoBack}
-        canGoForward={canGoForward}
-        view={view}
-      />
-      
       <div className="flex-1 overflow-hidden">
         {view === "home" ? (
           <Homepage onSearch={handleSearch} onNavigate={handleNavigateToUrl} />
         ) : view === "search" ? (
-          <SearchResults 
-            query={searchQuery} 
+          <SearchResults
+            query={searchQuery}
             onResultClick={handleResultClick}
+            onSearch={handleSearch}
           />
         ) : (
           <WebpageViewer url={currentUrl} onUrlChange={handleIframeUrlChange} />
