@@ -468,6 +468,86 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Image search
+  app.get("/api/search/images", async (req, res) => {
+    try {
+      const query = req.query.query as string;
+      if (!query) return res.status(400).json({ error: "Query required" });
+      const braveApiKey = process.env.BRAVE_SEARCH_API_KEY;
+      if (braveApiKey) {
+        try {
+          const r = await fetch(`https://api.search.brave.com/res/v1/images/search?q=${encodeURIComponent(query)}&count=24`, {
+            headers: { "Accept": "application/json", "Accept-Encoding": "gzip", "X-Subscription-Token": braveApiKey },
+            signal: AbortSignal.timeout(8000),
+          });
+          const data = await r.json();
+          const results = (data.results || []).map((item: any) => ({
+            title: item.title || "",
+            url: item.url || item.source || "",
+            thumbnail: item.thumbnail?.src || item.properties?.url || "",
+            source: item.source || (item.url ? new URL(item.url).hostname.replace("www.", "") : ""),
+          }));
+          return res.json(results);
+        } catch (e) {
+          console.warn("Brave image search failed:", e);
+        }
+      }
+      // Demo fallback
+      const demos = [
+        { title: `${query} - Wikipedia`, url: `https://en.wikipedia.org/wiki/${encodeURIComponent(query)}`, thumbnail: `https://picsum.photos/seed/${encodeURIComponent(query)}1/300/200`, source: "wikipedia.org" },
+        { title: `${query} photo`, url: "https://unsplash.com", thumbnail: `https://picsum.photos/seed/${encodeURIComponent(query)}2/300/200`, source: "unsplash.com" },
+        { title: `${query} image`, url: "https://commons.wikimedia.org", thumbnail: `https://picsum.photos/seed/${encodeURIComponent(query)}3/300/200`, source: "wikimedia.org" },
+        { title: `${query} picture`, url: "https://flickr.com", thumbnail: `https://picsum.photos/seed/${encodeURIComponent(query)}4/300/200`, source: "flickr.com" },
+        { title: `${query} photo 2`, url: "https://pexels.com", thumbnail: `https://picsum.photos/seed/${encodeURIComponent(query)}5/300/200`, source: "pexels.com" },
+        { title: `${query} stock photo`, url: "https://pixabay.com", thumbnail: `https://picsum.photos/seed/${encodeURIComponent(query)}6/300/200`, source: "pixabay.com" },
+      ];
+      res.json(demos);
+    } catch (error) {
+      res.status(500).json({ error: "Image search failed" });
+    }
+  });
+
+  // News search
+  app.get("/api/search/news", async (req, res) => {
+    try {
+      const query = req.query.query as string;
+      if (!query) return res.status(400).json({ error: "Query required" });
+      const braveApiKey = process.env.BRAVE_SEARCH_API_KEY;
+      if (braveApiKey) {
+        try {
+          const r = await fetch(`https://api.search.brave.com/res/v1/news/search?q=${encodeURIComponent(query)}&count=15`, {
+            headers: { "Accept": "application/json", "Accept-Encoding": "gzip", "X-Subscription-Token": braveApiKey },
+            signal: AbortSignal.timeout(8000),
+          });
+          const data = await r.json();
+          const results = (data.results || []).map((item: any) => ({
+            title: item.title || "",
+            url: item.url || "",
+            description: item.description || "",
+            age: item.age || "",
+            thumbnail: item.thumbnail?.src || "",
+            source: item.meta_url?.hostname?.replace("www.", "") || (item.url ? new URL(item.url).hostname.replace("www.", "") : ""),
+            favicon: item.meta_url?.favicon || "",
+          }));
+          return res.json(results);
+        } catch (e) {
+          console.warn("Brave news search failed:", e);
+        }
+      }
+      // Fallback to web search filtered for news
+      const webResults = getDemoSearchResults(query);
+      const news = webResults.filter(r => {
+        const newsKeywords = ["news", "bbc", "cnn", "nyt", "times", "post", "guardian", "reuters", "ap", "article"];
+        return newsKeywords.some(k => r.url.includes(k) || r.title.toLowerCase().includes(k));
+      });
+      res.json((news.length > 0 ? news : webResults.slice(0, 5)).map(r => ({
+        ...r, age: "Today", thumbnail: "", source: (() => { try { return new URL(r.url).hostname.replace("www.", ""); } catch { return ""; } })()
+      })));
+    } catch (error) {
+      res.status(500).json({ error: "News search failed" });
+    }
+  });
+
   const proxyRateLimit = new Map<string, number[]>();
   const RATE_LIMIT_WINDOW = 60000;
   const MAX_REQUESTS_PER_WINDOW = 300; // Increased for resource-intensive SPAs
