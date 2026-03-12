@@ -545,35 +545,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const query = req.query.query as string;
       if (!query) return res.status(400).json({ error: "Query required" });
-      const braveApiKey = process.env.BRAVE_SEARCH_API_KEY;
-      if (braveApiKey) {
-        try {
-          const r = await fetch(`https://api.search.brave.com/res/v1/images/search?q=${encodeURIComponent(query)}&count=24`, {
-            headers: { "Accept": "application/json", "Accept-Encoding": "gzip", "X-Subscription-Token": braveApiKey },
-            signal: AbortSignal.timeout(8000),
-          });
-          const data = await r.json();
-          const results = (data.results || []).map((item: any) => ({
-            title: item.title || "",
-            url: item.url || item.source || "",
-            thumbnail: item.thumbnail?.src || item.properties?.url || "",
-            source: item.source || (item.url ? new URL(item.url).hostname.replace("www.", "") : ""),
-          }));
-          return res.json(results);
-        } catch (e) {
-          console.warn("Brave image search failed:", e);
-        }
+      try {
+        const results = await fetchDuckDuckGoImages(query);
+        if (results.length > 0) return res.json(results);
+      } catch (e) {
+        console.warn("DDG image search failed:", e);
       }
-      // Demo fallback
-      const demos = [
-        { title: `${query} - Wikipedia`, url: `https://en.wikipedia.org/wiki/${encodeURIComponent(query)}`, thumbnail: `https://picsum.photos/seed/${encodeURIComponent(query)}1/300/200`, source: "wikipedia.org" },
-        { title: `${query} photo`, url: "https://unsplash.com", thumbnail: `https://picsum.photos/seed/${encodeURIComponent(query)}2/300/200`, source: "unsplash.com" },
-        { title: `${query} image`, url: "https://commons.wikimedia.org", thumbnail: `https://picsum.photos/seed/${encodeURIComponent(query)}3/300/200`, source: "wikimedia.org" },
-        { title: `${query} picture`, url: "https://flickr.com", thumbnail: `https://picsum.photos/seed/${encodeURIComponent(query)}4/300/200`, source: "flickr.com" },
-        { title: `${query} photo 2`, url: "https://pexels.com", thumbnail: `https://picsum.photos/seed/${encodeURIComponent(query)}5/300/200`, source: "pexels.com" },
-        { title: `${query} stock photo`, url: "https://pixabay.com", thumbnail: `https://picsum.photos/seed/${encodeURIComponent(query)}6/300/200`, source: "pixabay.com" },
-      ];
-      res.json(demos);
+      res.json([]);
     } catch (error) {
       res.status(500).json({ error: "Image search failed" });
     }
@@ -585,18 +563,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const query = req.query.query as string;
       if (!query) return res.status(400).json({ error: "Query required" });
       try {
-        const results = await fetchDuckDuckGoNews(query);
+        const results = await fetchDuckDuckGoNewsReal(query);
         if (results.length > 0) return res.json(results);
       } catch (e) {
-        console.warn("DDG news scrape failed:", e);
+        console.warn("DDG news API failed, trying HTML scrape:", e);
+        try {
+          const results = await fetchDuckDuckGoNews(query);
+          if (results.length > 0) return res.json(results);
+        } catch (e2) {
+          console.warn("DDG news HTML scrape failed:", e2);
+        }
       }
-      // Fallback
-      const webResults = getDemoSearchResults(query);
-      res.json(webResults.slice(0, 5).map(r => ({
-        ...r, age: "Today", thumbnail: "", source: (() => { try { return new URL(r.url).hostname.replace("www.", ""); } catch { return ""; } })()
-      })));
+      res.json([]);
     } catch (error) {
       res.status(500).json({ error: "News search failed" });
+    }
+  });
+
+  // Video search
+  app.get("/api/search/videos", async (req, res) => {
+    try {
+      const query = req.query.query as string;
+      if (!query) return res.status(400).json({ error: "Query required" });
+      try {
+        const results = await fetchDuckDuckGoVideos(query);
+        if (results.length > 0) return res.json(results);
+      } catch (e) {
+        console.warn("DDG video search failed:", e);
+      }
+      res.json([]);
+    } catch (error) {
+      res.status(500).json({ error: "Video search failed" });
     }
   });
 
@@ -3598,6 +3595,68 @@ async function fetchSerpApiResults(query: string, apiKey: string): Promise<Array
     url: result.link || '',
     description: result.snippet || '',
     favicon: result.favicon ? `data:image/png;base64,${result.favicon}` : undefined
+  }));
+}
+
+const DDG_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+async function getDdgVqd(query: string, type: 'images' | 'videos' | 'news'): Promise<string> {
+  const iaMap = { images: 'images', videos: 'videos', news: 'news' };
+  const url = `https://duckduckgo.com/?q=${encodeURIComponent(query)}&iax=${iaMap[type]}&ia=${iaMap[type]}`;
+  const r = await fetch(url, { headers: { 'User-Agent': DDG_UA }, signal: AbortSignal.timeout(8000) });
+  const html = await r.text();
+  const m = html.match(/vqd="([^"]+)"/);
+  if (!m) throw new Error('Could not extract vqd token');
+  return m[1];
+}
+
+async function fetchDuckDuckGoImages(query: string): Promise<Array<{ title: string; url: string; thumbnail: string; source: string }>> {
+  const vqd = await getDdgVqd(query, 'images');
+  const r = await fetch(`https://duckduckgo.com/i.js?q=${encodeURIComponent(query)}&o=json&vqd=${encodeURIComponent(vqd)}&f=,,,,,&p=1`, {
+    headers: { 'User-Agent': DDG_UA, 'Referer': 'https://duckduckgo.com/' },
+    signal: AbortSignal.timeout(8000),
+  });
+  const data = await r.json();
+  return (data.results || []).slice(0, 24).map((item: any) => ({
+    title: item.title || '',
+    url: item.url || '',
+    thumbnail: item.thumbnail || item.image || '',
+    source: item.url ? (() => { try { return new URL(item.url).hostname.replace('www.', ''); } catch { return ''; } })() : '',
+  }));
+}
+
+async function fetchDuckDuckGoVideos(query: string): Promise<Array<{ title: string; url: string; thumbnail: string; duration: string; publisher: string; publishedDate: string }>> {
+  const vqd = await getDdgVqd(query, 'videos');
+  const r = await fetch(`https://duckduckgo.com/v.js?q=${encodeURIComponent(query)}&o=json&vqd=${encodeURIComponent(vqd)}`, {
+    headers: { 'User-Agent': DDG_UA, 'Referer': 'https://duckduckgo.com/' },
+    signal: AbortSignal.timeout(8000),
+  });
+  const data = await r.json();
+  return (data.results || []).slice(0, 20).map((item: any) => ({
+    title: item.title || '',
+    url: item.content || item.url || '',
+    thumbnail: item.images?.small || item.images?.motion || '',
+    duration: item.duration || '',
+    publisher: item.publisher || '',
+    publishedDate: item.published || '',
+  }));
+}
+
+async function fetchDuckDuckGoNewsReal(query: string): Promise<Array<{ title: string; url: string; description: string; source: string; age: string; thumbnail: string; favicon: string }>> {
+  const vqd = await getDdgVqd(query, 'news');
+  const r = await fetch(`https://duckduckgo.com/news.js?q=${encodeURIComponent(query)}&o=json&vqd=${encodeURIComponent(vqd)}`, {
+    headers: { 'User-Agent': DDG_UA, 'Referer': 'https://duckduckgo.com/' },
+    signal: AbortSignal.timeout(8000),
+  });
+  const data = await r.json();
+  return (data.results || []).slice(0, 15).map((item: any) => ({
+    title: item.title || '',
+    url: item.url || '',
+    description: item.excerpt || item.body || '',
+    source: item.source || '',
+    age: item.date ? new Date(item.date * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '',
+    thumbnail: item.image || '',
+    favicon: item.source ? `https://www.google.com/s2/favicons?domain=${item.source}&sz=32` : '',
   }));
 }
 

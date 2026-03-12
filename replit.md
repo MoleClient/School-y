@@ -47,10 +47,20 @@ The browser uses multiple proxy methods:
 
 ## Search Configuration
 
-No API keys needed. School-y scrapes DuckDuckGo HTML (`https://html.duckduckgo.com/html/`) for real web search results using cheerio. Demo mode is a fallback only if DuckDuckGo is unreachable.
+No API keys needed. All search uses DuckDuckGo — no external API subscriptions required.
+
+- **Web results**: Scrapes `https://html.duckduckgo.com/html/` with cheerio
+- **Images**: DuckDuckGo image API (`/i.js`) with vqd token extraction — 24 real image results
+- **Videos**: DuckDuckGo video API (`/v.js`) with vqd token extraction — 20 real video results with thumbnails and durations
+- **News**: DuckDuckGo news API (`/news.js`) with vqd token extraction — 15 real news articles with source/date
 
 ### Autocomplete Suggestions
 Uses DuckDuckGo autocomplete (`https://duckduckgo.com/ac/?q=...`) — no API key required.
+
+### vqd Token Flow (Images/Videos/News)
+DuckDuckGo's media APIs require a `vqd` token. Flow:
+1. GET `https://duckduckgo.com/?q=QUERY&iax=TYPE&ia=TYPE` → extract `vqd="..."` from HTML
+2. Call the appropriate API endpoint with the vqd token
 
 ## AI Overview (Beta)
 The search results page includes a "Beta AI Overview" section that will display AI-generated summaries. User needs to provide:

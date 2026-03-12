@@ -218,29 +218,69 @@ function ImageResults({ query, onImageClick }: { query: string; onImageClick: (u
 }
 
 function VideoResults({ query, onVideoClick }: { query: string; onVideoClick: (url: string) => void }) {
-  const videos = [
-    { title: `${query} - YouTube Search`, url: `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`, source: "youtube.com", duration: "" },
-  ];
+  const { data, isLoading } = useQuery<Array<{ title: string; url: string; thumbnail: string; duration: string; publisher: string; publishedDate: string }>>({
+    queryKey: ["/api/search/videos", query],
+    queryFn: async () => {
+      const res = await fetch(`/api/search/videos?query=${encodeURIComponent(query)}`);
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+    enabled: !!query,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="py-6 max-w-[760px] space-y-3" style={{ paddingLeft: "clamp(16px, 10vw, 160px)", paddingRight: "16px" }}>
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="flex gap-4">
+            <Skeleton className="w-40 h-24 rounded-lg flex-shrink-0" />
+            <div className="flex-1 space-y-2 pt-1">
+              <Skeleton className="h-4 w-3/4" />
+              <Skeleton className="h-3 w-1/3" />
+              <Skeleton className="h-3 w-1/2" />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (!data || data.length === 0) {
+    return <div className="text-center py-12 text-muted-foreground">No videos found for "{query}"</div>;
+  }
 
   return (
-    <div className="py-6 max-w-[760px]" style={{ paddingLeft: "clamp(16px, 10vw, 160px)", paddingRight: "16px" }}>
-      <div className="mb-4 p-4 rounded-xl border border-border flex items-center gap-4 cursor-pointer hover-elevate" onClick={() => onVideoClick(`https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`)}>
-        <div className="w-20 h-14 rounded-lg bg-red-100 flex items-center justify-center flex-shrink-0">
-          <svg viewBox="0 0 24 24" width="28" height="28" fill="#FF0000">
-            <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
-          </svg>
+    <div className="py-6 max-w-[760px] space-y-4" style={{ paddingLeft: "clamp(16px, 10vw, 160px)", paddingRight: "16px" }}>
+      {data.map((video, i) => (
+        <div
+          key={i}
+          className="group flex gap-4 cursor-pointer hover-elevate rounded-xl p-2 -mx-2"
+          onClick={() => onVideoClick(video.url)}
+          data-testid={`card-video-${i}`}
+        >
+          <div className="relative flex-shrink-0 w-40 h-24 rounded-lg overflow-hidden bg-muted">
+            {video.thumbnail ? (
+              <img src={video.thumbnail} alt={video.title} className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center bg-muted">
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="#FF0000" opacity="0.5">
+                  <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+                </svg>
+              </div>
+            )}
+            {video.duration && (
+              <span className="absolute bottom-1 right-1 bg-black/80 text-white text-[10px] px-1 py-0.5 rounded font-mono">
+                {video.duration}
+              </span>
+            )}
+          </div>
+          <div className="flex-1 min-w-0 pt-1">
+            <h3 className="text-sm font-medium text-[#1a0dab] dark:text-[#8ab4f8] group-hover:underline line-clamp-2 leading-snug">{video.title}</h3>
+            <p className="text-xs text-muted-foreground mt-1">{video.publisher}</p>
+            {video.publishedDate && <p className="text-xs text-muted-foreground">{video.publishedDate}</p>}
+          </div>
         </div>
-        <div className="flex-1 min-w-0">
-          <h3 className="text-base font-medium text-[#1a0dab] hover:underline truncate">
-            Search "{query}" on YouTube
-          </h3>
-          <p className="text-sm text-muted-foreground mt-0.5">youtube.com · Browse video results</p>
-        </div>
-        <ExternalLink className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-      </div>
-      <p className="text-sm text-muted-foreground">
-        Click above to browse video results for "{query}" on YouTube via the School-y browser.
-      </p>
+      ))}
     </div>
   );
 }
