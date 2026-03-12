@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { ExternalLink, RefreshCw, AlertTriangle, Archive, Globe, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { RefreshCw, AlertTriangle, Archive, Globe, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RemoteBrowser } from "./remote-browser";
 
@@ -17,6 +17,7 @@ declare global {
 interface WebpageViewerProps {
   url: string;
   onUrlChange?: (newUrl: string) => void;
+  onNavigate?: (newUrl: string) => void;
 }
 
 // Remote browser disabled — unreliable in Replit environment.
@@ -94,19 +95,17 @@ function LoadingBar({ progress, visible }: { progress: number; visible: boolean 
   );
 }
 
-export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
+export function WebpageViewer({ url, onUrlChange, onNavigate }: WebpageViewerProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [loadProgress, setLoadProgress] = useState(0);
   const [showError, setShowError] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [uvReady, setUvReady] = useState(false);
   const [uvFailed, setUvFailed] = useState(false);
-  const [showNav, setShowNav] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const loadTimeoutRef = useRef<NodeJS.Timeout>();
   const progressIntervalRef = useRef<NodeJS.Timeout>();
   const uvReadyRef = useRef(false);
-  const navTimerRef = useRef<NodeJS.Timeout>();
 
   // Wait for UV service worker to be ready
   useEffect(() => {
@@ -227,13 +226,6 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
     window.open(fullUrl, '_blank');
   }, [cleanUrl]);
 
-  // Show navigation bar briefly on mouse move
-  const handleMouseMove = useCallback(() => {
-    setShowNav(true);
-    if (navTimerRef.current) clearTimeout(navTimerRef.current);
-    navTimerRef.current = setTimeout(() => setShowNav(false), 2500);
-  }, []);
-
   if (!cleanUrl) {
     return (
       <div className="flex items-center justify-center h-full bg-background">
@@ -243,35 +235,9 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
   }
 
   return (
-    <div className="relative w-full h-full bg-white" onMouseMove={handleMouseMove}>
+    <div className="relative w-full h-full bg-white">
       {/* Top loading bar */}
       <LoadingBar progress={loadProgress} visible={isLoading} />
-
-      {/* Floating nav bar - appears on mouse move */}
-      <div
-        className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-background/95 backdrop-blur-sm border border-border rounded-full shadow-lg px-3 py-1.5 transition-all duration-200"
-        style={{ opacity: showNav ? 1 : 0, pointerEvents: showNav ? 'all' : 'none' }}
-      >
-        <button
-          onClick={() => iframeRef.current && (iframeRef.current.src = iframeRef.current.src)}
-          className="p-1 text-muted-foreground hover:text-foreground transition-colors rounded-full hover:bg-secondary"
-          title="Reload"
-          data-testid="button-reload"
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-        </button>
-        <div className="text-xs text-muted-foreground max-w-[200px] truncate">
-          {(() => { try { return new URL(cleanUrl).hostname; } catch { return cleanUrl; } })()}
-        </div>
-        <button
-          onClick={openDirect}
-          className="p-1 text-muted-foreground hover:text-foreground transition-colors rounded-full hover:bg-secondary"
-          title="Open in new tab"
-          data-testid="button-open-external"
-        >
-          <ExternalLink className="w-3.5 h-3.5" />
-        </button>
-      </div>
 
       {/* Error overlay */}
       {showError && !isLoading && (
@@ -290,13 +256,13 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
                 Try Again
               </Button>
               <Button size="sm" variant="outline" onClick={() => {
-                if (onUrlChange) onUrlChange(`https://web.archive.org/web/${cleanUrl}`);
+                if (onNavigate) onNavigate(`https://web.archive.org/web/${cleanUrl}`);
               }} data-testid="button-wayback">
                 <Archive className="w-3.5 h-3.5 mr-1.5" />
                 Wayback Machine
               </Button>
               <Button size="sm" variant="outline" onClick={() => {
-                if (onUrlChange) onUrlChange(`https://webcache.googleusercontent.com/search?q=cache:${encodeURIComponent(cleanUrl)}`);
+                if (onNavigate) onNavigate(`https://webcache.googleusercontent.com/search?q=cache:${encodeURIComponent(cleanUrl)}`);
               }} data-testid="button-google-cache">
                 <Globe className="w-3.5 h-3.5 mr-1.5" />
                 Google Cache
@@ -321,7 +287,7 @@ export function WebpageViewer({ url, onUrlChange }: WebpageViewerProps) {
           style={{ display: 'block' }}
           onLoad={handleLoad}
           onError={handleError}
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals allow-presentation allow-orientation-lock allow-pointer-lock"
+          sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals allow-presentation allow-orientation-lock allow-pointer-lock"
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
           title="webpage"
           data-testid="iframe-webpage"
