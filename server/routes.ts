@@ -1298,13 +1298,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).send("Invalid protocol");
       }
 
+      const hostname = parsedUrl.hostname;
+      const isYouTube = hostname.endsWith('youtube.com') || hostname.endsWith('youtube-nocookie.com');
+      const isGoogleVideo = hostname.endsWith('googlevideo.com');
+      const isYouTubeRelated = isYouTube || isGoogleVideo || hostname.endsWith('ytimg.com') || hostname.endsWith('ggpht.com');
+
       // Build headers to forward (Range for video streaming, Accept for SSE)
       const forwardHeaders: Record<string, string> = {
-        'User-Agent': userAgents[0],
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': req.headers.accept || '*/*',
         'Accept-Language': 'en-US,en;q=0.9',
         'Accept-Encoding': 'identity', // Don't request compression for streaming
       };
+
+      // Spoof Origin and Referer for YouTube/googlevideo so the video streams are authorized
+      if (isYouTubeRelated) {
+        forwardHeaders['Origin'] = 'https://www.youtube.com';
+        forwardHeaders['Referer'] = 'https://www.youtube.com/';
+        forwardHeaders['Sec-Fetch-Dest'] = isGoogleVideo ? 'video' : 'empty';
+        forwardHeaders['Sec-Fetch-Mode'] = 'cors';
+        forwardHeaders['Sec-Fetch-Site'] = 'cross-site';
+      }
+
+      // For YouTube player API calls, add YouTube client headers
+      if (isYouTube && parsedUrl.pathname.includes('/youtubei/')) {
+        forwardHeaders['X-YouTube-Client-Name'] = '1';
+        forwardHeaders['X-YouTube-Client-Version'] = '2.20241028.01.00';
+        forwardHeaders['X-Goog-Visitor-Id'] = '';
+        forwardHeaders['Content-Type'] = req.headers['content-type'] || 'application/json';
+      }
 
       // Forward Range header for video streaming (YouTube, etc.)
       if (req.headers.range) {
@@ -1316,6 +1338,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         forwardHeaders['Content-Type'] = req.headers['content-type'];
       }
 
+      // Forward cookies if present (needed for authenticated YouTube)
+      if (req.headers.cookie && isYouTubeRelated) {
+        forwardHeaders['Cookie'] = req.headers.cookie;
+      }
+
       // Check if this is an SSE request
       const isSSE = req.headers.accept?.includes('text/event-stream');
       
@@ -1323,6 +1350,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
         method: req.method,
         headers: forwardHeaders,
       };
+
+      // YouTube player API interception — use TV client to bypass n-signature throttling
+      const isYtPlayerApi = isYouTube && parsedUrl.pathname.includes('/youtubei/v1/player');
+      if (isYtPlayerApi && req.method === 'POST' && req.body) {
+        try {
+          const bodyStr = Buffer.isBuffer(req.body) ? req.body.toString('utf-8') : String(req.body);
+          const bodyJson = JSON.parse(bodyStr);
+          // Override with TVHTML5 embedded client — returns usable stream URLs without n-sig issues
+          bodyJson.context = bodyJson.context || {};
+          bodyJson.context.client = {
+            clientName: 'TVHTML5_SIMPLY_EMBEDDED_PLAYER',
+            clientVersion: '2.0',
+            gl: bodyJson.context.client?.gl || 'US',
+            hl: bodyJson.context.client?.hl || 'en',
+          };
+          // Remove fields that can trigger bot detection
+          delete bodyJson.context.request;
+          delete bodyJson.context.user;
+          delete bodyJson.context.adSignalsInfo;
+          fetchOptions.body = JSON.stringify(bodyJson);
+          forwardHeaders['Content-Type'] = 'application/json';
+          // Use the TV embedded key
+          const tvUrl = new URL(targetUrl);
+          tvUrl.searchParams.set('key', 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8');
+          fetchOptions.headers = forwardHeaders;
+          const tvResponse = await fetch(tvUrl.toString(), fetchOptions);
+          if (tvResponse.ok) {
+            const contentType = tvResponse.headers.get('content-type') || 'application/json';
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Access-Control-Allow-Headers', '*');
+            res.setHeader('Content-Type', contentType);
+            res.status(tvResponse.status);
+            const buffer = Buffer.from(await tvResponse.arrayBuffer());
+            return res.send(buffer);
+          }
+        } catch (e) {
+          console.warn('YouTube TV client interceptor failed, falling back:', e);
+        }
+      }
 
       // Forward body for POST/PUT/PATCH - use raw Buffer directly
       if (['POST', 'PUT', 'PATCH'].includes(req.method) && req.body) {
@@ -2426,13 +2492,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ error: "Not allowed" });
       }
 
+      const xpHostname = parsedUrl.hostname;
+      const xpIsYouTube = xpHostname.endsWith('youtube.com') || xpHostname.endsWith('youtube-nocookie.com');
+      const xpIsGoogleVideo = xpHostname.endsWith('googlevideo.com');
+      const xpIsYTRelated = xpIsYouTube || xpIsGoogleVideo || xpHostname.endsWith('ytimg.com') || xpHostname.endsWith('ggpht.com');
+
       // Forward the request with full headers for better compatibility
       const headers: Record<string, string> = {
-        'User-Agent': userAgents[Math.floor(Math.random() * userAgents.length)],
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': req.headers.accept as string || '*/*',
         'Accept-Language': 'en-US,en;q=0.9',
         'Accept-Encoding': 'identity', // Request uncompressed for streaming
       };
+
+      // Spoof Origin/Referer for YouTube and Google Video CDN
+      if (xpIsYTRelated) {
+        headers['Origin'] = 'https://www.youtube.com';
+        headers['Referer'] = 'https://www.youtube.com/';
+        headers['Sec-Fetch-Dest'] = xpIsGoogleVideo ? 'video' : 'empty';
+        headers['Sec-Fetch-Mode'] = 'cors';
+        headers['Sec-Fetch-Site'] = 'cross-site';
+      }
 
       // Forward content-type for POST/PUT/PATCH
       if (['POST', 'PUT', 'PATCH'].includes(req.method) && req.headers['content-type']) {
@@ -2447,6 +2527,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } else if (typeof req.body === 'object') {
           body = JSON.stringify(req.body);
           headers['Content-Type'] = 'application/json';
+        }
+      }
+
+      // Forward Range header for video streaming (YouTube segments, seeking)
+      if (req.headers.range) {
+        headers['Range'] = req.headers.range as string;
+      }
+
+      // YouTube player API interception in /api/xp — use TV client to bypass n-sig throttling
+      if (xpIsYouTube && parsedUrl.pathname.includes('/youtubei/v1/player') && req.method === 'POST' && body) {
+        try {
+          const bodyStr = Buffer.isBuffer(body) ? body.toString('utf-8') : String(body);
+          const bodyJson = JSON.parse(bodyStr);
+          bodyJson.context = bodyJson.context || {};
+          bodyJson.context.client = {
+            clientName: 'TVHTML5_SIMPLY_EMBEDDED_PLAYER',
+            clientVersion: '2.0',
+            gl: bodyJson.context.client?.gl || 'US',
+            hl: bodyJson.context.client?.hl || 'en',
+          };
+          delete bodyJson.context.request;
+          delete bodyJson.context.user;
+          delete bodyJson.context.adSignalsInfo;
+          body = JSON.stringify(bodyJson);
+          headers['Content-Type'] = 'application/json';
+          const tvUrl = new URL(targetUrl);
+          tvUrl.searchParams.set('key', 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8');
+          const tvController = new AbortController();
+          const tvTimeout = setTimeout(() => tvController.abort(), 12000);
+          const tvResponse = await fetch(tvUrl.toString(), { method: 'POST', headers, body, signal: tvController.signal });
+          clearTimeout(tvTimeout);
+          if (tvResponse.ok) {
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Content-Type', tvResponse.headers.get('content-type') || 'application/json');
+            res.status(tvResponse.status);
+            return res.send(Buffer.from(await tvResponse.arrayBuffer()));
+          }
+        } catch (e) {
+          console.warn('YouTube xp TV intercept failed, falling back:', e);
         }
       }
 
@@ -2473,8 +2592,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const value = response.headers.get(header);
         if (value) res.setHeader(header, value);
       }
+
+      // Forward video streaming headers
+      const contentRange = response.headers.get('content-range');
+      const acceptRanges = response.headers.get('accept-ranges');
+      const contentLength = response.headers.get('content-length');
+      if (contentRange) res.setHeader('Content-Range', contentRange);
+      if (acceptRanges) res.setHeader('Accept-Ranges', acceptRanges);
+      if (contentLength) res.setHeader('Content-Length', contentLength);
       
       res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length');
       res.setHeader('X-Content-Type-Options', 'nosniff');
       res.status(response.status);
 
