@@ -882,6 +882,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 (function() {
   var B = "${baseUrl}";
   var KEY = ${OBFUSCATION_KEY};
+
+  // Protect sandbox from escape (allow-same-origin + allow-scripts would otherwise allow
+  // site JS to do window.frameElement.removeAttribute('sandbox') and escape)
+  try {
+    Object.defineProperty(window, 'frameElement', { get: function() { return null; }, configurable: false, enumerable: false });
+  } catch(e) {}
+  // Also hide parent/top so sites can't navigate them
+  try {
+    var _postMsg = window.parent && window.parent.postMessage ? window.parent.postMessage.bind(window.parent) : function(){};
+    Object.defineProperty(window, 'parent', { get: function() { return window; }, configurable: false });
+    Object.defineProperty(window, 'top', { get: function() { return window; }, configurable: false });
+    // Re-expose a safe postMessage so our notifyParent still works
+    window.__safePostParent = _postMsg;
+  } catch(e) {}
   
   // Disable Service Workers to prevent offline detection issues
   if ('serviceWorker' in navigator) {
@@ -946,11 +960,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
   
   function notifyParent(url) {
-    if (window.parent && window.parent !== window) {
-      try {
-        window.parent.postMessage({ type: 'navigation', url: decodeProxy(url) }, '*');
-      } catch(e) {}
-    }
+    try {
+      var fn = window.__safePostParent || (window.parent && window.parent !== window && window.parent.postMessage && window.parent.postMessage.bind(window.parent));
+      if (fn) fn({ type: 'navigation', url: decodeProxy(url) }, '*');
+    } catch(e) {}
   }
   
   // Override window.open to stay in proxy
@@ -1034,31 +1047,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
     window.open(downloadUrl, '_blank');
   }
   
-  // Click handler - catch all link clicks including target=_blank
+  // Click handler - only intercept cross-origin links; let SPA routers handle same-origin
   document.addEventListener('click', function(e) {
     var link = e.target && e.target.closest ? e.target.closest('a[href]') : null;
     if (!link) return;
     var href = link.getAttribute('href');
-    if (!href || href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('/b/')) return;
-    
-    // Check if this is a download link
+    if (!href || href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('/b/') || href.startsWith('/api/')) return;
+
+    // Resolve to absolute URL
+    var abs = href;
+    if (href.startsWith('//')) abs = 'https:' + href;
+    else if (href.startsWith('/')) abs = B + href;
+    else if (!href.match(/^https?:\\/\\//)) abs = B + '/' + href;
+
+    // If same-origin as target site, remove bad targets but let SPA router handle
+    try {
+      var bHost = new URL(B).hostname;
+      var absHost = new URL(abs).hostname;
+      if (bHost === absHost) {
+        var t = link.getAttribute('target');
+        if (t && (t === '_blank' || t === '_top' || t === '_parent')) link.removeAttribute('target');
+        return; // Let SPA's own event handler fire
+      }
+    } catch(_e) {}
+
+    // Cross-origin link — intercept and proxy
     var hasDownloadAttr = link.hasAttribute('download');
     var downloadFilename = link.getAttribute('download') || '';
-    var isDownload = hasDownloadAttr || isDownloadUrl(href);
-    
-    if (isDownload) {
+    if (hasDownloadAttr || isDownloadUrl(href)) {
       e.preventDefault();
       e.stopPropagation();
       e.stopImmediatePropagation();
-      triggerDownload(href, downloadFilename);
+      triggerDownload(abs, downloadFilename);
       return false;
     }
-    
+
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
-    
-    var proxyUrl = toProxy(href);
+    var proxyUrl = toProxy(abs);
     notifyParent(proxyUrl);
     location.href = proxyUrl;
     return false;
@@ -1075,32 +1102,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   }, true);
   
-  // Form submission interception
+  // Form submission interception — only for cross-origin form actions
   document.addEventListener('submit', function(e) {
     var form = e.target;
     if (!form || form.tagName !== 'FORM') return;
-    var action = form.getAttribute('action') || '';
+    var action = form.getAttribute('action') || location.pathname;
     if (action.startsWith('/b/') || action.startsWith('/api/')) return;
-    
+
+    // Resolve action to absolute
+    var absAction = action;
+    if (action.startsWith('//')) absAction = 'https:' + action;
+    else if (action.startsWith('/')) absAction = B + action;
+    else if (!action.match(/^https?:\\/\\//)) absAction = B + '/' + action;
+
+    // Same-origin form — let the site handle it naturally
+    try {
+      var bHost = new URL(B).hostname;
+      var aHost = new URL(absAction).hostname;
+      if (bHost === aHost) return;
+    } catch(_e) {}
+
+    // Cross-origin form — proxy it
     e.preventDefault();
     e.stopPropagation();
-    
-    var method = (form.getAttribute('method') || 'GET').toUpperCase();
-    var formData = new FormData(form);
-    
-    if (method === 'GET') {
-      var params = new URLSearchParams(formData).toString();
-      var url = action || location.pathname;
-      var fullUrl = url + (url.includes('?') ? '&' : '?') + params;
-      var proxyUrl = toProxy(fullUrl);
-      notifyParent(proxyUrl);
-      location.href = proxyUrl;
-    } else {
-      // POST - just navigate to action
-      var proxyUrl = toProxy(action || location.pathname);
-      notifyParent(proxyUrl);
-      location.href = proxyUrl;
-    }
+    var proxyUrl = toProxy(absAction);
+    notifyParent(proxyUrl);
+    location.href = proxyUrl;
     return false;
   }, true);
   

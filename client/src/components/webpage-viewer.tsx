@@ -287,7 +287,7 @@ export function WebpageViewer({ url, onUrlChange, onNavigate }: WebpageViewerPro
           style={{ display: 'block' }}
           onLoad={handleLoad}
           onError={handleError}
-          sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals allow-presentation allow-orientation-lock allow-pointer-lock"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals allow-presentation allow-orientation-lock allow-pointer-lock"
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
           title="webpage"
           data-testid="iframe-webpage"

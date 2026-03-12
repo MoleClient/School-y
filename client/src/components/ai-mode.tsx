@@ -2,6 +2,9 @@ import { useState, useRef, useEffect } from "react";
 import { Send } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 import { GeminiSparkle } from "./ai-overview";
 
 interface Message {
@@ -19,7 +22,8 @@ interface AIModeProps {
 function MarkdownMessage({ content, onResultClick }: { content: string; onResultClick: (url: string) => void }) {
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={[remarkGfm, remarkMath]}
+      rehypePlugins={[rehypeKatex]}
       components={{
         p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>,
         ul: ({ children }) => <ul className="my-3 space-y-1">{children}</ul>,
@@ -275,7 +279,7 @@ export function AIMode({ query, searchResults, onResultClick }: AIModeProps) {
                   e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
                 }}
                 onKeyDown={handleKeyDown}
-                placeholder="Ask a follow-up question..."
+                placeholder="Ask a follow-up question... (supports LaTeX: $E=mc^2$)"
                 rows={1}
                 disabled={isStreaming}
                 className="w-full px-4 py-3 text-sm outline-none resize-none disabled:opacity-50"
@@ -294,7 +298,7 @@ export function AIMode({ query, searchResults, onResultClick }: AIModeProps) {
             </button>
           </form>
           <p className="text-[11px] mt-1.5 text-center" style={{ color: "#9aa0a6" }}>
-            Powered by AI · Responses may be inaccurate
+            Powered by AI · Supports Markdown & LaTeX · Responses may be inaccurate
           </p>
         </div>
       </div>

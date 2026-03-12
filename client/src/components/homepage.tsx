@@ -1,12 +1,61 @@
 import { useState, useRef, useEffect, KeyboardEvent } from "react";
-import { Search } from "lucide-react";
+import { Search, X } from "lucide-react";
 import { SchoolyLogo } from "./schooly-logo";
 import { LuckyWheel } from "./lucky-wheel";
 import { SpringScene } from "./spring-scene";
+import { useLocation } from "wouter";
 
 interface HomepageProps {
   onSearch: (query: string) => void;
   onNavigate: (url: string) => void;
+}
+
+function StorePopup({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handler as any);
+    return () => document.removeEventListener("keydown", handler as any);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: "rgba(0,0,0,0.35)" }}
+      onClick={onClose}
+      data-testid="overlay-store"
+    >
+      <div
+        className="bg-background rounded-2xl shadow-xl px-8 py-8 max-w-sm w-full mx-4 relative"
+        onClick={(e) => e.stopPropagation()}
+        data-testid="popup-store"
+      >
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 p-1 rounded-full hover:bg-muted text-muted-foreground"
+          data-testid="button-close-store"
+        >
+          <X className="w-4 h-4" />
+        </button>
+        <div className="mb-4 flex justify-center">
+          <SchoolyLogo size="small" />
+        </div>
+        <h2 className="text-lg font-semibold text-center text-foreground mb-2">School-y Store</h2>
+        <p className="text-center text-muted-foreground text-sm leading-relaxed">
+          Talk To Me If You Want Unlimited Access
+        </p>
+        <div className="mt-6 flex justify-center">
+          <button
+            onClick={onClose}
+            className="px-6 py-2 text-sm rounded-full text-white"
+            style={{ background: "linear-gradient(135deg, #4285F4, #6B72CF)" }}
+            data-testid="button-store-ok"
+          >
+            Got it
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function Homepage({ onSearch, onNavigate }: HomepageProps) {
@@ -15,8 +64,10 @@ export function Homepage({ onSearch, onNavigate }: HomepageProps) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedIdx, setSelectedIdx] = useState(-1);
   const [showWheel, setShowWheel] = useState(false);
+  const [showStore, setShowStore] = useState(false);
   const suggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [, setLocation] = useLocation();
 
   const navigate = (value: string) => {
     const trimmed = value.trim();
@@ -71,7 +122,6 @@ export function Homepage({ onSearch, onNavigate }: HomepageProps) {
     navigate(s);
   };
 
-  // Close suggestions on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
@@ -87,14 +137,26 @@ export function Homepage({ onSearch, onNavigate }: HomepageProps) {
   return (
     <div className="h-full flex flex-col bg-background">
       {showWheel && <LuckyWheel onClose={() => setShowWheel(false)} />}
+      {showStore && <StorePopup onClose={() => setShowStore(false)} />}
 
       <header className="flex items-center justify-end gap-4 px-4 py-2">
-        <a href="#" className="text-[13px] text-foreground/80 hover:underline">About</a>
-        <a href="#" className="text-[13px] text-foreground/80 hover:underline">Store</a>
+        <button
+          onClick={() => setLocation("/about")}
+          className="text-[13px] text-foreground/80 hover:underline bg-transparent border-none"
+          data-testid="button-about"
+        >
+          About
+        </button>
+        <button
+          onClick={() => setShowStore(true)}
+          className="text-[13px] text-foreground/80 hover:underline bg-transparent border-none"
+          data-testid="button-store"
+        >
+          Store
+        </button>
       </header>
 
       <div className="flex-1 flex flex-col">
-        {/* Search area — centered in top portion */}
         <div className="flex flex-col items-center justify-center" style={{ flex: "0 0 auto", paddingTop: "clamp(32px, 8vh, 80px)", paddingBottom: 16 }}>
           <div className="mb-8">
             <SchoolyLogo size="large" />
@@ -120,7 +182,6 @@ export function Homepage({ onSearch, onNavigate }: HomepageProps) {
                 />
               </div>
 
-              {/* Suggestions dropdown */}
               {isOpen && (
                 <div className="absolute top-full left-0 right-0 bg-background border border-[#dfe1e5] border-t-0 rounded-b-2xl shadow-md z-50 overflow-hidden">
                   <div className="h-px bg-[#e8eaed] mx-4" />
@@ -157,7 +218,6 @@ export function Homepage({ onSearch, onNavigate }: HomepageProps) {
           </div>
         </div>
 
-        {/* Spring scene — SVG fills remaining space naturally */}
         <SpringScene />
       </div>
 
