@@ -3519,13 +3519,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Optimize Wisp for video streaming:
   // - IPv4 first: avoids slow IPv6 fallback on Replit infrastructure
-  // - Longer DNS TTL: CDN domains stay cached for 10 min so we keep affinity
-  //   to the same CDN node (same IP = same anycast node = faster)
-  // - Stream limit per host: mirrors browser's own connection-per-host limit
-  //   (~6-8 for HTTP/1.1) to prevent CDN rate-limiting from Replit's IP
+  // - Longer DNS TTL: CDN domains stay cached 10 min for CDN node affinity
+  // NOTE: Do NOT set stream_limit_per_host — ConnThrottled responses cause
+  // epoxy to tear down the entire WebSocket ("MuxTaskEnded" for all requests).
   wisp.options.dns_result_order = "ipv4first";
   wisp.options.dns_ttl = 600;
-  wisp.options.stream_limit_per_host = 20;
 
   // Unified WebSocket upgrade router — must handle ALL paths here because ws's
   // own upgrade handler (when attached to a server) destroys unrecognised sockets.
@@ -3533,7 +3531,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   httpServer.on("upgrade", (req, socket, head) => {
     const url = req.url || "";
     if (url.startsWith("/wisp/")) {
-      wisp.routeRequest(req, socket, head);
+      // ping_interval: 10 keeps the WebSocket alive every 10 s so Replit's
+      // reverse proxy doesn't kill idle Wisp connections (default was 30 s).
+      wisp.routeRequest(req, socket, head, { ping_interval: 10 });
     } else if (url.startsWith("/api/ws")) {
       wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
     } else if (url.startsWith("/api/remote-browser")) {
