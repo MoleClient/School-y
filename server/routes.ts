@@ -11,7 +11,7 @@ import express from 'express';
 import { uvPath } from "@titaniumnetwork-dev/ultraviolet";
 import { epoxyPath } from "@mercuryworkshop/epoxy-transport";
 import { baremuxPath } from "@mercuryworkshop/bare-mux/node";
-import { server as wisp } from "@mercuryworkshop/wisp-js/server";
+import { server as wisp, logging as wispLogging } from "@mercuryworkshop/wisp-js/server";
 import * as cheerio from 'cheerio';
 
 // Configure Puppeteer with stealth plugin to bypass bot detection
@@ -3513,6 +3513,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Remote Browser WebSocket Server - Puppeteer-based streaming browser
   // Also noServer mode to avoid the ws upgrade handler blocking /wisp/ connections
   const remoteBrowserWss = new WebSocketServer({ noServer: true });
+
+  // Quiet Wisp's verbose per-stream INFO logs — only show warnings/errors
+  wispLogging.set_level(wispLogging.WARN);
 
   // Unified WebSocket upgrade router — must handle ALL paths here because ws's
   // own upgrade handler (when attached to a server) destroys unrecognised sockets.
