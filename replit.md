@@ -10,7 +10,7 @@ A web browser platform designed to look like Google's homepage, featuring a clea
 - **Embedded Webpage Viewer**: View websites without redirecting using advanced iframe + proxy technology
 - **No Authentication**: Direct access with no password block
 - **URL Obfuscation**: Domain names are XOR-encoded and base64-encoded to evade content filter detection
-- **Video Streaming**: Range header support for YouTube and other video sites with chunked transfer
+- **YouTube Playback**: Embedded YouTube IFrame player injected when visiting YouTube watch pages through the proxy
 - **Real-time Support**: WebSocket tunneling and SSE proxy for chat apps, live updates, and streaming content
 - **Remote Browser**: Puppeteer-based fallback for complex SPAs (ChatGPT, Claude, Discord, etc.)
 

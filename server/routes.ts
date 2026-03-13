@@ -1247,6 +1247,88 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
   observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'srcset', 'data-src'] });
+
+  // ===== YOUTUBE VIDEO PLAYER OVERRIDE =====
+  // When on a YouTube watch page, inject an IFrame embed so the video plays without cipher issues
+  (function initYouTubePlayer() {
+    var ytHost = B.replace('https://', '').replace('http://', '').split('/')[0];
+    var isYouTube = ytHost.endsWith('youtube.com') || ytHost.endsWith('youtube-nocookie.com');
+    if (!isYouTube) return;
+
+    function getVideoId() {
+      try {
+        var decoded = decodeProxy(realLocation.pathname);
+        if (!decoded) return null;
+        var qs = decoded.indexOf('?');
+        if (qs === -1) return null;
+        return new URLSearchParams(decoded.substring(qs)).get('v');
+      } catch(e) { return null; }
+    }
+
+    var videoId = getVideoId();
+    if (!videoId) return;
+
+    var overlayId = '__schooly_yt_player__';
+
+    function buildPlayer(vid) {
+      if (document.getElementById(overlayId)) return;
+
+      var overlay = document.createElement('div');
+      overlay.id = overlayId;
+      overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.97);z-index:2147483647;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:Arial,sans-serif;';
+
+      // Use YouTube's official embed (youtube-nocookie.com for privacy) inside an iframe
+      var embedUrl = 'https://www.youtube-nocookie.com/embed/' + vid + '?autoplay=1&rel=0';
+
+      var iframe = document.createElement('iframe');
+      iframe.src = embedUrl;
+      iframe.style.cssText = 'width:min(92vw,960px);height:min(54vw,540px);border:none;border-radius:8px;background:#000;';
+      iframe.setAttribute('allowfullscreen', '');
+      iframe.setAttribute('allow', 'autoplay; fullscreen; encrypted-media; picture-in-picture');
+      overlay.appendChild(iframe);
+
+      var closeBtn = document.createElement('button');
+      closeBtn.textContent = 'Close Player';
+      closeBtn.style.cssText = 'margin-top:16px;padding:7px 22px;border-radius:20px;border:1px solid #666;background:#333;color:#ccc;cursor:pointer;font-size:14px;';
+      closeBtn.onclick = function() { overlay.remove(); };
+      overlay.appendChild(closeBtn);
+
+      var label = document.createElement('div');
+      label.textContent = 'School-y Player — powered by YouTube Embed';
+      label.style.cssText = 'color:#555;font-size:11px;margin-top:10px;';
+      overlay.appendChild(label);
+
+      document.body.appendChild(overlay);
+    }
+
+    function tryBuildPlayer() {
+      if (document.body) {
+        buildPlayer(videoId);
+      } else {
+        setTimeout(tryBuildPlayer, 200);
+      }
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', function() { tryBuildPlayer(); });
+    } else {
+      setTimeout(tryBuildPlayer, 300);
+    }
+
+    // Handle SPA navigation to a watch page
+    var lastVid = videoId;
+    function onNavChange() {
+      var newVid = getVideoId();
+      if (newVid && newVid !== lastVid) {
+        lastVid = newVid;
+        var old = document.getElementById(overlayId);
+        if (old) old.remove();
+        setTimeout(function() { buildPlayer(newVid); }, 400);
+      }
+    }
+    window.addEventListener('popstate', onNavChange);
+    setInterval(onNavChange, 1500);
+  })();
+
 })();
 </script>`;
 
@@ -1503,6 +1585,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).send("Error");
     }
   });
+
 
   // Download endpoint - forces file download with proper headers
   app.get("/api/download", async (req, res) => {
