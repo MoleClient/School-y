@@ -1102,9 +1102,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   }, true);
   
-  // Form submission interception — proxy ALL forms because the iframe URL is on our server,
-  // so relative/same-origin form actions would resolve against localhost, not the target site.
+  // Form submission interception — runs in BUBBLE phase so site's own JS (e.g. YouTube's SPA
+  // search handler) runs first. Only intercept if the site didn't already prevent default.
   document.addEventListener('submit', function(e) {
+    // If the site's own JS already prevented the form default (SPA navigation), do nothing.
+    if (e.defaultPrevented) return;
+
     var form = e.target;
     if (!form || form.tagName !== 'FORM') return;
     var action = form.getAttribute('action') || location.pathname;
@@ -1118,7 +1121,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     var method = (form.method || 'get').toLowerCase();
 
-    // For GET forms, append form fields as query params then navigate the iframe
+    // GET forms: collect fields and navigate to proxied URL.
+    // We must intercept even same-origin forms because the iframe's URL is on our server,
+    // so the browser would resolve the action against localhost, not the target site.
     if (method === 'get') {
       var fd = new FormData(form);
       var params = new URLSearchParams();
@@ -1127,14 +1132,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       var sep = absAction.indexOf('?') >= 0 ? '&' : '?';
       var destUrl = absAction + (qs ? sep + qs : '');
       e.preventDefault();
-      e.stopPropagation();
       var proxyUrl = toProxy(destUrl);
       notifyParent(proxyUrl);
       location.href = proxyUrl;
       return false;
     }
 
-    // For POST forms, only intercept if cross-origin (same-origin POSTs may be AJAX handled)
+    // POST forms: only intercept cross-origin (same-origin POSTs may be handled by the site)
     try {
       var bHost = new URL(B).hostname;
       var aHost = new URL(absAction).hostname;
@@ -1142,12 +1146,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch(_e) {}
 
     e.preventDefault();
-    e.stopPropagation();
     var proxyUrl = toProxy(absAction);
     notifyParent(proxyUrl);
     location.href = proxyUrl;
     return false;
-  }, true);
+  }, false);
   
   // XHR intercept
   var _xhrOpen = XMLHttpRequest.prototype.open;

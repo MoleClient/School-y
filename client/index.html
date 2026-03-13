@@ -12,7 +12,7 @@
     <!-- Force fresh load when app version changes -->
     <script>
       (function() {
-        var V = 'schooly-v20260312-5';
+        var V = 'schooly-v20260313-1';
         if (localStorage.getItem('_sv') !== V) {
           localStorage.setItem('_sv', V);
           if (window.location.search.indexOf('_r=1') === -1) {
@@ -52,28 +52,12 @@
             throw new Error('BareMuxConnection not found in module. Available exports: ' + Object.keys(bareModule).join(', '));
           }
           
-          // Create connection and set transport
+          // Create connection and set transport — skip raw WebSocket test because Wisp
+          // requires a proper Wisp protocol handshake (not a plain ws:// connection).
           const wispUrl = (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host + '/wisp/';
           console.log('[UV] Wisp URL:', wispUrl);
           const connection = new BareMuxConnection('/baremux/worker.js');
           console.log('[UV] Connection created');
-          
-          // Test Wisp connectivity before enabling UV
-          const wispWorks = await new Promise((resolve) => {
-            try {
-              const testWs = new WebSocket(wispUrl);
-              const timer = setTimeout(() => { testWs.close(); resolve(false); }, 4000);
-              testWs.onopen = () => { clearTimeout(timer); testWs.close(); resolve(true); };
-              testWs.onerror = () => { clearTimeout(timer); resolve(false); };
-            } catch(e) { resolve(false); }
-          });
-          
-          if (!wispWorks) {
-            console.warn('[UV] Wisp test failed - using legacy proxy instead');
-            window.__uvReady = false;
-            window.dispatchEvent(new Event('uvready'));
-            return;
-          }
           
           await connection.setTransport('/epoxy/index.mjs', [{ wisp: wispUrl }]);
           console.log('[UV] Transport set');
