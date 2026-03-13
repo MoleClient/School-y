@@ -12,6 +12,7 @@ import { uvPath } from "@titaniumnetwork-dev/ultraviolet";
 import { epoxyPath } from "@mercuryworkshop/epoxy-transport";
 import { baremuxPath } from "@mercuryworkshop/bare-mux/node";
 import { server as wisp, logging as wispLogging } from "@mercuryworkshop/wisp-js/server";
+import dns from "dns";
 import * as cheerio from 'cheerio';
 
 // Configure Puppeteer with stealth plugin to bypass bot detection
@@ -3517,13 +3518,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Quiet Wisp's verbose per-stream INFO logs — only show warnings/errors
   wispLogging.set_level(wispLogging.WARN);
 
-  // Optimize Wisp for video streaming:
-  // - IPv4 first: avoids slow IPv6 fallback on Replit infrastructure
-  // - Longer DNS TTL: CDN domains stay cached 10 min for CDN node affinity
-  // NOTE: Do NOT set stream_limit_per_host — ConnThrottled responses cause
-  // epoxy to tear down the entire WebSocket ("MuxTaskEnded" for all requests).
-  wisp.options.dns_result_order = "ipv4first";
+  // Custom IPv4-only DNS resolver.
+  // Replit has no IPv6 support.  Without this, many game servers (slither.io,
+  // krunker, shell shockers, etc.) fail because their game-server hostnames
+  // resolve to AAAA (IPv6) records.  Wisp then tries to open a TCP stream to
+  // that IPv6 address, which hangs until timeout → games spin forever.
+  // Solution:
+  //   1. If the hostname IS already a raw IPv6 address (contains ':'), reject
+  //      immediately so the browser gets a fast error instead of a timeout.
+  //   2. Otherwise do an A-record-only lookup (family: 4) so we only ever
+  //      get IPv4 back, even for dual-stack servers.
+  // Also cache DNS for 10 minutes for CDN node affinity.
   wisp.options.dns_ttl = 600;
+  wisp.options.dns_method = async (hostname: string): Promise<string> => {
+    // Fast-reject raw IPv6 address literals (e.g. "2001:41d0:700:782a::")
+    if (hostname.includes(":")) {
+      throw new Error(`IPv6 not supported on this server: ${hostname}`);
+    }
+    // Also fast-reject if it's already a valid IPv4 — no lookup needed
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) {
+      return hostname;
+    }
+    // Force A-record (IPv4) lookup only
+    return new Promise<string>((resolve, reject) => {
+      dns.lookup(hostname, { family: 4 }, (err, addr) => {
+        if (err) reject(err);
+        else resolve(addr);
+      });
+    });
+  };
 
   // Unified WebSocket upgrade router — must handle ALL paths here because ws's
   // own upgrade handler (when attached to a server) destroys unrecognised sockets.
