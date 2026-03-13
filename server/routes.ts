@@ -11,7 +11,7 @@ import express from 'express';
 import { uvPath } from "@titaniumnetwork-dev/ultraviolet";
 import { epoxyPath } from "@mercuryworkshop/epoxy-transport";
 import { baremuxPath } from "@mercuryworkshop/bare-mux/node";
-import wisp from "wisp-server-node";
+import { server as wisp } from "@mercuryworkshop/wisp-js/server";
 import * as cheerio from 'cheerio';
 
 // Configure Puppeteer with stealth plugin to bypass bot detection
