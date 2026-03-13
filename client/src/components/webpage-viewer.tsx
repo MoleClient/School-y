@@ -11,6 +11,7 @@ declare global {
       decodeUrl: (url: string) => string;
     };
     __uvReady?: boolean;
+    __reinitUV?: () => Promise<boolean>;
   }
 }
 
@@ -106,6 +107,7 @@ export function WebpageViewer({ url, onUrlChange, onNavigate }: WebpageViewerPro
   const loadTimeoutRef = useRef<NodeJS.Timeout>();
   const progressIntervalRef = useRef<NodeJS.Timeout>();
   const uvReadyRef = useRef(false);
+  const uvWispRetryRef = useRef(0); // how many times we've tried to reinit Wisp
 
   // Wait for UV service worker to be ready
   useEffect(() => {
@@ -180,6 +182,7 @@ export function WebpageViewer({ url, onUrlChange, onNavigate }: WebpageViewerPro
 
   // Start loading whenever the target URL changes
   useEffect(() => {
+    uvWispRetryRef.current = 0; // reset Wisp retry counter on new URL
     if (cleanUrl) startLoading();
     return () => {
       if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
@@ -188,16 +191,45 @@ export function WebpageViewer({ url, onUrlChange, onNavigate }: WebpageViewerPro
   }, [cleanUrl]);
 
   const handleLoad = useCallback(() => {
-    // Detect UV error page and fall back to legacy proxy
+    // Detect UV error page
     try {
       const doc = iframeRef.current?.contentDocument;
       const title = doc?.title || '';
       const bodyText = doc?.body?.innerText || '';
-      if (title.includes('Error') && (bodyText.includes('Hyper client') || bodyText.includes('Wisp') || bodyText.includes('WebSocket'))) {
-        setUvFailed(true);
-        return; // New URL will load via legacy proxy
+      const isWispError = title.includes('Error') && (
+        bodyText.includes('Hyper client') || bodyText.includes('Wisp') ||
+        bodyText.includes('WebSocket') || bodyText.includes('MuxTask')
+      );
+      if (isWispError) {
+        const retries = uvWispRetryRef.current;
+        if (retries < 3 && window.__reinitUV) {
+          // Auto-reconnect and retry with UV
+          uvWispRetryRef.current = retries + 1;
+          console.log(`[UV] Wisp dropped, reinitialising (attempt ${retries + 1}/3)...`);
+          window.__reinitUV().then((ok) => {
+            if (ok && iframeRef.current) {
+              // Small delay to let Wisp settle, then retry
+              setTimeout(() => {
+                if (iframeRef.current) {
+                  // Force iframe src refresh by toggling
+                  const src = iframeRef.current.src;
+                  iframeRef.current.src = '';
+                  setTimeout(() => { if (iframeRef.current) iframeRef.current.src = src; }, 50);
+                }
+              }, 500);
+            } else {
+              setUvFailed(true);
+            }
+          });
+        } else {
+          // Exhausted retries — fall back to legacy proxy permanently
+          setUvFailed(true);
+        }
+        return;
       }
     } catch { /* cross-origin - can't read, treat as success */ }
+    // Success path
+    uvWispRetryRef.current = 0; // reset retry counter on clean load
     if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
     if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
     setLoadProgress(100);

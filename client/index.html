@@ -43,52 +43,48 @@
           
           // Dynamic import using Function to bypass Vite
           const importFn = new Function('url', 'return import(url)');
-          console.log('[UV] Loading BareMux...');
           const bareModule = await importFn('/baremux/index.mjs');
-          console.log('[UV] BareMux loaded:', Object.keys(bareModule));
           const BareMuxConnection = bareModule.BareMuxConnection;
           
           if (!BareMuxConnection) {
-            throw new Error('BareMuxConnection not found in module. Available exports: ' + Object.keys(bareModule).join(', '));
+            throw new Error('BareMuxConnection not found. Available: ' + Object.keys(bareModule).join(', '));
           }
           
-          // Create connection and set transport — skip raw WebSocket test because Wisp
-          // requires a proper Wisp protocol handshake (not a plain ws:// connection).
           const wispUrl = (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host + '/wisp/';
-          console.log('[UV] Wisp URL:', wispUrl);
           const connection = new BareMuxConnection('/baremux/worker.js');
-          console.log('[UV] Connection created');
+          
+          // Expose reinitUV so the app can reconnect when Wisp drops (MuxTaskEnded, etc.)
+          window.__reinitUV = async function() {
+            try {
+              console.log('[UV] Reinitialising Wisp connection...');
+              await connection.setTransport('/epoxy/index.mjs', [{ wisp: wispUrl }]);
+              console.log('[UV] Wisp reconnected');
+              return true;
+            } catch(e) {
+              console.error('[UV] Reinit failed:', e.message);
+              return false;
+            }
+          };
           
           await connection.setTransport('/epoxy/index.mjs', [{ wisp: wispUrl }]);
           console.log('[UV] Transport set');
           
-          // Register service worker
-          console.log('[UV] Registering SW...');
           const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/service/' });
           console.log('[UV] SW registered:', registration.scope);
           
-          // Wait for SW to be active (don't use navigator.serviceWorker.ready - it only works for pages in SW scope)
           if (registration.installing) {
-            console.log('[UV] SW installing...');
             await new Promise((resolve) => {
               registration.installing.addEventListener('statechange', function() {
-                if (this.state === 'activated') {
-                  console.log('[UV] SW activated');
-                  resolve();
-                }
+                if (this.state === 'activated') resolve();
               });
             });
-          } else if (registration.waiting) {
-            console.log('[UV] SW waiting, skipping to claims...');
-          } else if (registration.active) {
-            console.log('[UV] SW already active');
           }
           
           console.log('[UV] Setup complete!');
           window.__uvReady = true;
           window.dispatchEvent(new Event('uvready'));
         } catch (err) {
-          console.error('[UV] Setup failed:', err.message || err, err.stack || '');
+          console.error('[UV] Setup failed:', err.message || err);
           window.__uvReady = false;
           window.dispatchEvent(new Event('uvready'));
         }
