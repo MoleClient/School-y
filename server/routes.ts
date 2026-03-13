@@ -1102,27 +1102,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   }, true);
   
-  // Form submission interception — only for cross-origin form actions
+  // Form submission interception — proxy ALL forms because the iframe URL is on our server,
+  // so relative/same-origin form actions would resolve against localhost, not the target site.
   document.addEventListener('submit', function(e) {
     var form = e.target;
     if (!form || form.tagName !== 'FORM') return;
     var action = form.getAttribute('action') || location.pathname;
     if (action.startsWith('/b/') || action.startsWith('/api/')) return;
 
-    // Resolve action to absolute
+    // Resolve action to absolute URL using B (the target site base)
     var absAction = action;
     if (action.startsWith('//')) absAction = 'https:' + action;
     else if (action.startsWith('/')) absAction = B + action;
     else if (!action.match(/^https?:\\/\\//)) absAction = B + '/' + action;
 
-    // Same-origin form — let the site handle it naturally
+    var method = (form.method || 'get').toLowerCase();
+
+    // For GET forms, append form fields as query params then navigate the iframe
+    if (method === 'get') {
+      var fd = new FormData(form);
+      var params = new URLSearchParams();
+      fd.forEach(function(val, key) { params.append(key, String(val)); });
+      var qs = params.toString();
+      var sep = absAction.indexOf('?') >= 0 ? '&' : '?';
+      var destUrl = absAction + (qs ? sep + qs : '');
+      e.preventDefault();
+      e.stopPropagation();
+      var proxyUrl = toProxy(destUrl);
+      notifyParent(proxyUrl);
+      location.href = proxyUrl;
+      return false;
+    }
+
+    // For POST forms, only intercept if cross-origin (same-origin POSTs may be AJAX handled)
     try {
       var bHost = new URL(B).hostname;
       var aHost = new URL(absAction).hostname;
       if (bHost === aHost) return;
     } catch(_e) {}
 
-    // Cross-origin form — proxy it
     e.preventDefault();
     e.stopPropagation();
     var proxyUrl = toProxy(absAction);
