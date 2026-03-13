@@ -3517,6 +3517,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Quiet Wisp's verbose per-stream INFO logs — only show warnings/errors
   wispLogging.set_level(wispLogging.WARN);
 
+  // Optimize Wisp for video streaming:
+  // - IPv4 first: avoids slow IPv6 fallback on Replit infrastructure
+  // - Longer DNS TTL: CDN domains stay cached for 10 min so we keep affinity
+  //   to the same CDN node (same IP = same anycast node = faster)
+  // - Stream limit per host: mirrors browser's own connection-per-host limit
+  //   (~6-8 for HTTP/1.1) to prevent CDN rate-limiting from Replit's IP
+  wisp.options.dns_result_order = "ipv4first";
+  wisp.options.dns_ttl = 600;
+  wisp.options.stream_limit_per_host = 20;
+
   // Unified WebSocket upgrade router — must handle ALL paths here because ws's
   // own upgrade handler (when attached to a server) destroys unrecognised sockets.
   // Using noServer mode on both wss instances lets us control routing fully.
