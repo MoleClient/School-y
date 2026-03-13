@@ -3370,7 +3370,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
 
   // WebSocket tunneling for real-time connections
-  const wss = new WebSocketServer({ server: httpServer, path: '/api/ws' });
+  // Use noServer mode so we can manually route upgrades — otherwise ws destroys non-matching sockets before Wisp gets them
+  const wss = new WebSocketServer({ noServer: true });
   
   wss.on('connection', (clientWs, req) => {
     const parsedReqUrl = new URL(req.url || '', 'http://localhost');
@@ -3509,15 +3510,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/epoxy/", express.static(epoxyPath));
   app.use("/baremux/", express.static(baremuxPath));
 
-  // Wisp WebSocket handler for Ultraviolet
+  // Remote Browser WebSocket Server - Puppeteer-based streaming browser
+  // Also noServer mode to avoid the ws upgrade handler blocking /wisp/ connections
+  const remoteBrowserWss = new WebSocketServer({ noServer: true });
+
+  // Unified WebSocket upgrade router — must handle ALL paths here because ws's
+  // own upgrade handler (when attached to a server) destroys unrecognised sockets.
+  // Using noServer mode on both wss instances lets us control routing fully.
   httpServer.on("upgrade", (req, socket, head) => {
-    if (req.url && req.url.startsWith("/wisp/")) {
+    const url = req.url || "";
+    if (url.startsWith("/wisp/")) {
       wisp.routeRequest(req, socket, head);
+    } else if (url.startsWith("/api/ws")) {
+      wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+    } else if (url.startsWith("/api/remote-browser")) {
+      remoteBrowserWss.handleUpgrade(req, socket, head, (ws) => remoteBrowserWss.emit("connection", ws, req));
+    } else {
+      socket.destroy();
     }
   });
-
-  // Remote Browser WebSocket Server - Puppeteer-based streaming browser
-  const remoteBrowserWss = new WebSocketServer({ server: httpServer, path: '/api/remote-browser' });
   
   // Store active browser sessions
   const browserSessions = new Map<WebSocket, { browser: any; page: any; streaming: boolean }>();
