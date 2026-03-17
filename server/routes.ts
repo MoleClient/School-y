@@ -19,6 +19,8 @@ import { join } from "path";
 
 // SSE clients: userId → Set<Response> for targeted delivery
 const chatSseClients = new Map<string, Set<any>>();
+// Typing state: convId → Map<userId, clearTimeout handle>
+const typingTimers = new Map<string, Map<string, ReturnType<typeof setTimeout>>>();
 function broadcastToUsers(userIds: string[], event: string, data: any) {
   const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const uid of userIds) {
@@ -909,6 +911,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch {
       res.status(500).json({ error: "Failed to toggle reaction" });
     }
+  });
+
+  // Typing indicator — broadcast to other members for 3 seconds
+  app.post("/api/conversations/:id/typing", async (req: any, res) => {
+    const user = await getSessionUser(req);
+    if (!user) return res.status(401).json({ error: "Not logged in" });
+    try {
+      const memberIds = await storage.getConversationMemberIds(req.params.id);
+      const others = memberIds.filter(uid => uid !== user.id);
+      broadcastToUsers(others, "typing", {
+        conversationId: req.params.id,
+        userId: user.id,
+        username: user.username,
+        displayName: user.displayName,
+        avatarUrl: user.avatarUrl,
+        isTyping: true,
+      });
+      // Auto-clear after 3 seconds
+      if (!typingTimers.has(req.params.id)) typingTimers.set(req.params.id, new Map());
+      const convMap = typingTimers.get(req.params.id)!;
+      if (convMap.has(user.id)) clearTimeout(convMap.get(user.id)!);
+      convMap.set(user.id, setTimeout(() => {
+        broadcastToUsers(others, "typing", {
+          conversationId: req.params.id,
+          userId: user.id,
+          username: user.username,
+          displayName: user.displayName,
+          avatarUrl: user.avatarUrl,
+          isTyping: false,
+        });
+        convMap.delete(user.id);
+      }, 3000));
+      res.json({ ok: true });
+    } catch { res.status(500).json({ error: "Failed" }); }
   });
 
   // AI Overview - server-side using OPENROUTER_API_KEY secret

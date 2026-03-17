@@ -143,19 +143,20 @@ function EmojiPicker({ onSelect, onClose }: { onSelect: (e: string) => void; onC
 
 function MessageBubble({
   msg, isMine, allMessages, currentUserId, onReply, onEdit, onDelete, onReact,
-  isFirst, isLast, readOnly,
+  isFirst, isLast, readOnly, isNew,
 }: {
   msg: Message; isMine: boolean; allMessages: Message[];
   currentUserId?: string; onReply: (m: Message) => void;
   onEdit: (m: Message) => void; onDelete: (id: string) => void;
   onReact: (msgId: string, emoji: string) => void;
-  isFirst: boolean; isLast: boolean; readOnly?: boolean;
+  isFirst: boolean; isLast: boolean; readOnly?: boolean; isNew?: boolean;
 }) {
   const [hovered, setHovered] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(msg.content);
   const [showOriginal, setShowOriginal] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
+  const [poppedEmoji, setPoppedEmoji] = useState<string | null>(null);
   const editRef = useRef<HTMLTextAreaElement>(null);
 
   const replyTarget = msg.replyToId ? allMessages.find(m => m.id === msg.replyToId) : null;
@@ -204,9 +205,11 @@ function MessageBubble({
 
   const bubbleRadius = getBubbleRadius();
 
+  const bubbleAnim = isNew ? (isMine ? "animate-bubble-right" : "animate-bubble-left") : "";
+
   return (
     <div
-      className={`flex gap-2 items-end group ${isMine ? "flex-row-reverse" : "flex-row"} ${isLast ? "mb-1" : "mb-[2px]"}`}
+      className={`flex gap-2 items-end group ${isMine ? "flex-row-reverse" : "flex-row"} ${isLast ? "mb-1" : "mb-[2px]"} ${bubbleAnim}`}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => { setHovered(false); setShowEmoji(false); }}>
 
@@ -323,12 +326,17 @@ function MessageBubble({
             {Object.entries(reactionGroups).map(([emoji, { count, mine }]) => (
               <button
                 key={emoji}
-                onClick={() => !readOnly && onReact(msg.id, emoji)}
-                className={`flex items-center gap-0.5 text-xs px-2 py-0.5 rounded-full border transition-colors ${
+                onClick={() => {
+                  if (readOnly) return;
+                  setPoppedEmoji(emoji);
+                  setTimeout(() => setPoppedEmoji(null), 350);
+                  onReact(msg.id, emoji);
+                }}
+                className={`flex items-center gap-0.5 text-xs px-2 py-0.5 rounded-full border transition-all ${
                   mine
                     ? "bg-[#007AFF]/10 border-[#007AFF]/30 text-[#007AFF]"
                     : "bg-[#F2F2F7] border-[#E5E5EA] text-[#3C3C43]"
-                }`}>
+                } ${poppedEmoji === emoji ? "animate-reaction-pop" : ""}`}>
                 <span>{emoji}</span>
                 {count > 1 && <span className="font-medium">{count}</span>}
               </button>
@@ -348,27 +356,80 @@ function MessageBubble({
   );
 }
 
+// ─── TypingIndicator ──────────────────────────────────────────────────────────
+
+function TypingIndicator({ users }: { users: { username: string; displayName?: string | null; avatarUrl?: string | null }[] }) {
+  if (users.length === 0) return null;
+  const label = users.length === 1
+    ? (users[0].displayName || users[0].username)
+    : users.length === 2
+      ? `${users[0].displayName || users[0].username} & ${users[1].displayName || users[1].username}`
+      : `${users[0].displayName || users[0].username} & ${users.length - 1} others`;
+
+  return (
+    <div className="flex gap-2 items-end mb-1 animate-bubble-left">
+      <div className="w-8 flex-shrink-0 self-end mb-0.5">
+        <Avatar className="h-8 w-8 text-xs">
+          {users[0].avatarUrl && <img src={users[0].avatarUrl} className="h-8 w-8 rounded-full object-cover" />}
+          <AvatarFallback className="bg-[#E5E5EA] text-[#3C3C43] font-semibold text-xs">
+            {(users[0].displayName || users[0].username || "?").slice(0, 2).toUpperCase()}
+          </AvatarFallback>
+        </Avatar>
+      </div>
+      <div className="flex flex-col items-start">
+        <span className="text-[11px] text-[#8E8E93] mb-1 ml-1 font-medium">{label}</span>
+        <div className="bg-[#E5E5EA] rounded-[22px] rounded-bl-[6px] px-4 py-3 flex items-center gap-1.5">
+          <span className="h-2 w-2 rounded-full bg-[#8E8E93] animate-typing-1 inline-block" />
+          <span className="h-2 w-2 rounded-full bg-[#8E8E93] animate-typing-2 inline-block" />
+          <span className="h-2 w-2 rounded-full bg-[#8E8E93] animate-typing-3 inline-block" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── MessageInput ─────────────────────────────────────────────────────────────
 
 function MessageInput({
-  onSend, replyTo, onCancelReply, disabled,
+  onSend, replyTo, onCancelReply, disabled, convId,
 }: {
   onSend: (text: string, imageUrl?: string | null) => void;
   replyTo: Message | null;
   onCancelReply: () => void;
   disabled?: boolean;
+  convId?: string;
 }) {
   const [text, setText] = useState("");
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [focused, setFocused] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
+  const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const broadcastTyping = useCallback(() => {
+    if (!convId || disabled) return;
+    apiRequest("POST", `/api/conversations/${convId}/typing`, {}).catch(() => {});
+  }, [convId, disabled]);
+
+  const handleTextChange = (val: string) => {
+    setText(val);
+    if (val.trim() && convId && !disabled) {
+      if (typingTimer.current) clearTimeout(typingTimer.current);
+      broadcastTyping();
+      typingTimer.current = setTimeout(() => {}, 2500);
+    }
+  };
 
   const handleSend = () => {
     if (!text.trim() && !imageUrl) return;
+    setSending(true);
+    setTimeout(() => setSending(false), 300);
     onSend(text.trim(), imageUrl);
     setText("");
     setImageUrl(null);
+    if (typingTimer.current) clearTimeout(typingTimer.current);
     setTimeout(() => textRef.current?.focus(), 50);
   };
 
@@ -431,13 +492,17 @@ function MessageInput({
         </button>
         <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleImage} />
 
-        <div className="flex-1 flex items-end bg-white border border-[#C7C7CC] rounded-[22px] px-3 py-1.5">
+        <div className={`flex-1 flex items-end bg-white border rounded-[22px] px-3 py-1.5 transition-all duration-200 ${
+          focused ? "border-[#007AFF] shadow-[0_0_0_3px_rgba(0,122,255,0.12)]" : "border-[#C7C7CC]"
+        }`}>
           <textarea
             ref={textRef}
             value={text}
-            onChange={e => setText(e.target.value)}
+            onChange={e => handleTextChange(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={disabled ? "Sign in to message..." : "iMessage"}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            placeholder={disabled ? "Sign in to message..." : "School-y Text"}
             disabled={disabled}
             rows={1}
             className="flex-1 bg-transparent text-[15px] text-[#1C1C1E] placeholder-[#8E8E93] outline-none resize-none max-h-28 leading-[1.4] py-0.5"
@@ -448,11 +513,11 @@ function MessageInput({
         <button
           onClick={handleSend}
           disabled={!text.trim() && !imageUrl}
-          className={`p-2 rounded-full flex-shrink-0 transition-colors ${
+          className={`p-2 rounded-full flex-shrink-0 transition-all duration-200 ${
             text.trim() || imageUrl
-              ? "bg-[#007AFF] text-white"
-              : "bg-[#E5E5EA] text-[#8E8E93]"
-          }`}>
+              ? "bg-[#007AFF] text-white scale-100"
+              : "bg-[#E5E5EA] text-[#8E8E93] scale-90 opacity-70"
+          } ${sending ? "animate-send-pulse" : ""}`}>
           <Send className="h-4 w-4" />
         </button>
       </div>
@@ -696,6 +761,8 @@ function ConversationThread({ conv, currentUser, onBack, readOnly }: {
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [showInfo, setShowInfo] = useState(false);
   const [addingMember, setAddingMember] = useState(false);
+  const [typingUsers, setTypingUsers] = useState<Map<string, { username: string; displayName?: string | null; avatarUrl?: string | null }>>(new Map());
+  const newMsgIds = useRef<Set<string>>(new Set());
   const bottomRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
@@ -721,6 +788,11 @@ function ConversationThread({ conv, currentUser, onBack, readOnly }: {
     if (messages.length > 0) scrollToBottom();
   }, [messages.length]);
 
+  // Scroll to show typing indicator
+  useEffect(() => {
+    if (typingUsers.size > 0) scrollToBottom();
+  }, [typingUsers.size]);
+
   // SSE for real-time messages
   useEffect(() => {
     if (readOnly) return;
@@ -729,7 +801,18 @@ function ConversationThread({ conv, currentUser, onBack, readOnly }: {
     es.addEventListener("message", e => {
       const msg = JSON.parse(e.data) as Message;
       if (msg.conversationId !== conv.id) return;
-      setMessages(prev => prev.find(m => m.id === msg.id) ? prev : [...prev, msg]);
+      setMessages(prev => {
+        if (prev.find(m => m.id === msg.id)) return prev;
+        newMsgIds.current.add(msg.id);
+        setTimeout(() => { newMsgIds.current.delete(msg.id); }, 800);
+        return [...prev, msg];
+      });
+      // Clear typing for the sender
+      setTypingUsers(prev => {
+        const next = new Map(prev);
+        next.delete(msg.userId);
+        return next;
+      });
     });
     es.addEventListener("message_edited", e => {
       const { id, content, editedAt, originalContent } = JSON.parse(e.data);
@@ -747,6 +830,16 @@ function ConversationThread({ conv, currentUser, onBack, readOnly }: {
       setMessages(prev => prev.map(m =>
         m.id === messageId ? { ...m, reactions } : m
       ));
+    });
+    es.addEventListener("typing", e => {
+      const { conversationId, userId, username, displayName, avatarUrl, isTyping } = JSON.parse(e.data);
+      if (conversationId !== conv.id) return;
+      setTypingUsers(prev => {
+        const next = new Map(prev);
+        if (isTyping) next.set(userId, { username, displayName, avatarUrl });
+        else next.delete(userId);
+        return next;
+      });
     });
     return () => es.close();
   }, [conv.id, currentUser?.id, readOnly]);
@@ -798,7 +891,7 @@ function ConversationThread({ conv, currentUser, onBack, readOnly }: {
   const memberCount = conv.members?.length || 0;
 
   return (
-    <div className="flex flex-col h-full min-h-0 bg-white">
+    <div key={conv.id} className="flex flex-col h-full min-h-0 bg-white animate-conv-fade">
       {/* Header — iOS style */}
       <div className="flex flex-col items-center px-4 pt-3 pb-2 border-b border-[#E5E5EA] bg-white relative">
         <button onClick={onBack}
@@ -875,11 +968,19 @@ function ConversationThread({ conv, currentUser, onBack, readOnly }: {
       <div className="flex-1 overflow-y-auto min-h-0">
         <div className="flex flex-col justify-end min-h-full px-3 py-4">
           {loading ? (
-            <div className="flex items-center justify-center py-16">
-              <div className="text-[#8E8E93] text-sm">Loading messages...</div>
+            <div className="flex flex-col gap-3 px-1 pb-2">
+              {/* Skeleton bubbles */}
+              {[{ w: "w-48", mine: false }, { w: "w-36", mine: true }, { w: "w-56", mine: false },
+                { w: "w-32", mine: false }, { w: "w-44", mine: true }, { w: "w-40", mine: false }].map((s, i) => (
+                <div key={i} className={`flex gap-2 items-end ${s.mine ? "flex-row-reverse" : "flex-row"}`}>
+                  {!s.mine && <div className="h-8 w-8 rounded-full bg-[#E5E5EA] flex-shrink-0 animate-skeleton" />}
+                  <div className={`h-10 ${s.w} rounded-[22px] bg-[#E5E5EA] animate-skeleton`}
+                    style={{ animationDelay: `${i * 120}ms` }} />
+                </div>
+              ))}
             </div>
           ) : messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 gap-2">
+            <div className="flex flex-col items-center justify-center py-16 gap-2 animate-conv-fade">
               <div className="h-16 w-16 rounded-full bg-[#F2F2F7] flex items-center justify-center">
                 <MessageSquarePlus className="h-8 w-8 text-[#C7C7CC]" />
               </div>
@@ -888,8 +989,9 @@ function ConversationThread({ conv, currentUser, onBack, readOnly }: {
           ) : (
             <div className="flex flex-col gap-0">
               {messages.map((msg, i) => {
-                const first = isGroupBreak(messages, i) || msg.isSystem;
-                const last = isNextGroupBreak(messages, i) || msg.isSystem;
+                const first = isGroupBreak(messages, i) || !!msg.isSystem;
+                const last = isNextGroupBreak(messages, i) || !!msg.isSystem;
+                const isNew = newMsgIds.current.has(msg.id);
                 return (
                   <div key={msg.id}>
                     {shouldShowDateSeparator(messages, i) && (
@@ -912,10 +1014,12 @@ function ConversationThread({ conv, currentUser, onBack, readOnly }: {
                       isFirst={first}
                       isLast={last}
                       readOnly={readOnly}
+                      isNew={isNew}
                     />
                   </div>
                 );
               })}
+              <TypingIndicator users={Array.from(typingUsers.values())} />
             </div>
           )}
           <div ref={bottomRef} />
@@ -940,6 +1044,7 @@ function ConversationThread({ conv, currentUser, onBack, readOnly }: {
           replyTo={replyTo}
           onCancelReply={() => setReplyTo(null)}
           disabled={!currentUser}
+          convId={conv.id}
         />
       )}
     </div>
