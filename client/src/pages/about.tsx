@@ -1,14 +1,13 @@
 import { useLocation } from "wouter";
 import { SchoolyLogo } from "@/components/schooly-logo";
-import { SpringScene } from "@/components/spring-scene";
 import { ArrowLeft } from "lucide-react";
 
 export default function AboutPage() {
   const [, setLocation] = useLocation();
 
   return (
-    <div className="h-screen w-screen bg-background flex flex-col overflow-hidden">
-      <header className="flex items-center justify-between px-6 py-3 border-b border-border bg-background">
+    <div className="min-h-screen bg-background flex flex-col">
+      <header className="flex items-center px-6 py-4 border-b border-border">
         <button
           onClick={() => setLocation("/")}
           className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
@@ -17,44 +16,37 @@ export default function AboutPage() {
           <ArrowLeft className="w-4 h-4" />
           Back
         </button>
-        <SchoolyLogo size="small" onClick={() => setLocation("/")} />
-        <div className="w-16" />
       </header>
 
-      <div className="flex-1 overflow-auto">
-        <div className="max-w-2xl mx-auto px-6 py-12">
-          <div className="flex justify-center mb-8">
-            <SchoolyLogo size="large" />
-          </div>
-
-          <div className="space-y-6 text-center">
-            <h1 className="text-2xl font-semibold text-foreground">About School-y</h1>
-            <p className="text-muted-foreground leading-relaxed">
-              School-y is a Google-inspired web browser built for students. Search the web, browse freely, and get AI-powered answers — all in one clean interface.
-            </p>
-          </div>
-
-          <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {[
-              { title: "Real Search Results", desc: "Powered by DuckDuckGo — no tracking, no API keys needed." },
-              { title: "AI Overview", desc: "Get instant AI summaries for any search query using cutting-edge models." },
-              { title: "Built-in Browser", desc: "Visit any website through the integrated proxy browser without leaving School-y." },
-              { title: "Spring Break 2026", desc: "Celebrating spring with an animated homepage scene — enjoy the season!" },
-            ].map((f) => (
-              <div key={f.title} className="rounded-lg border border-border bg-card p-4">
-                <h3 className="font-medium text-foreground mb-1">{f.title}</h3>
-                <p className="text-sm text-muted-foreground">{f.desc}</p>
-              </div>
-            ))}
-          </div>
-
-          <div className="mt-10 text-center text-sm text-muted-foreground">
-            <p>School-y &copy; Spring 2026 &nbsp;&middot;&nbsp; Built with love for students everywhere</p>
-          </div>
+      <main className="flex-1 max-w-xl mx-auto w-full px-6 py-16">
+        <div className="mb-12">
+          <SchoolyLogo size="small" />
         </div>
 
-        <SpringScene />
-      </div>
+        <h1 className="text-3xl font-semibold tracking-tight text-foreground mb-4">About School-y</h1>
+        <p className="text-base text-muted-foreground leading-relaxed mb-12">
+          School-y is a web browser built for students. Search the web, browse freely, and get AI-powered answers — all from one place.
+        </p>
+
+        <div className="space-y-8">
+          {[
+            { title: "Search", desc: "Powered by DuckDuckGo. No tracking, no API keys, no nonsense." },
+            { title: "AI Overview", desc: "Instant AI summaries appear at the top of search results for any query." },
+            { title: "Built-in Browser", desc: "Visit any site through the proxy without leaving School-y." },
+            { title: "School Messages", desc: "Group chat, direct messages, and reactions — all live, no refresh needed." },
+            { title: "User Accounts", desc: "Create an account to save browsing history, customize your profile, and chat." },
+          ].map((f) => (
+            <div key={f.title}>
+              <h3 className="text-sm font-semibold text-foreground mb-1">{f.title}</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">{f.desc}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-16 pt-8 border-t border-border">
+          <p className="text-xs text-muted-foreground">School-y &copy; {new Date().getFullYear()}</p>
+        </div>
+      </main>
     </div>
   );
 }

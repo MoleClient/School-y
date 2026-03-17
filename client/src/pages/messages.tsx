@@ -3,11 +3,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import { AuthModal } from "@/components/auth-modal";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Input } from "@/components/ui/input";
 import {
   Send, Image as ImageIcon, Reply, Pencil, Trash2, X, Plus,
   Users, MessageSquarePlus, SmilePlus, Check, Info, ChevronLeft,
-  Search, UserPlus
+  UserPlus, Lock
 } from "lucide-react";
 import { useLocation } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
@@ -90,6 +89,21 @@ function shouldShowDateSeparator(msgs: Message[], i: number) {
   return prev.toDateString() !== curr.toDateString();
 }
 
+// For iMessage grouping — is this message within 5 min of same sender?
+function isGroupBreak(msgs: Message[], i: number) {
+  if (i === 0) return true;
+  const prev = msgs[i - 1];
+  const curr = msgs[i];
+  if (prev.userId !== curr.userId) return true;
+  const diff = new Date(curr.createdAt).getTime() - new Date(prev.createdAt).getTime();
+  return diff > 5 * 60 * 1000;
+}
+
+function isNextGroupBreak(msgs: Message[], i: number) {
+  if (i === msgs.length - 1) return true;
+  return isGroupBreak(msgs, i + 1);
+}
+
 // ─── UserAvatar ───────────────────────────────────────────────────────────────
 
 function UserAvatar({ user, size = "sm" }: { user: UserMeta; size?: "sm" | "md" }) {
@@ -97,7 +111,7 @@ function UserAvatar({ user, size = "sm" }: { user: UserMeta; size?: "sm" | "md" 
   return (
     <Avatar className={cls}>
       {user.avatarUrl && <AvatarImage src={user.avatarUrl} alt={user.username} />}
-      <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold">{initials(user)}</AvatarFallback>
+      <AvatarFallback className="bg-[#E5E5EA] text-[#3C3C43] font-semibold text-xs">{initials(user)}</AvatarFallback>
     </Avatar>
   );
 }
@@ -112,10 +126,12 @@ function EmojiPicker({ onSelect, onClose }: { onSelect: (e: string) => void; onC
     return () => document.removeEventListener("mousedown", h);
   }, [onClose]);
   return (
-    <div ref={ref} className="absolute z-50 bg-white border border-gray-200 rounded-2xl shadow-xl p-2 flex gap-1" style={{ bottom: "110%", right: 0 }}>
+    <div ref={ref}
+      className="absolute z-50 bg-white border border-[#E5E5EA] rounded-2xl shadow-xl p-1.5 flex gap-0.5"
+      style={{ bottom: "110%", right: 0 }}>
       {QUICK_EMOJIS.map(e => (
         <button key={e} onClick={() => { onSelect(e); onClose(); }}
-          className="text-xl hover:scale-125 transition-transform p-1 rounded-xl hover:bg-gray-100">
+          className="text-lg hover:scale-125 transition-transform p-1.5 rounded-xl hover:bg-[#F2F2F7]">
           {e}
         </button>
       ))}
@@ -127,11 +143,13 @@ function EmojiPicker({ onSelect, onClose }: { onSelect: (e: string) => void; onC
 
 function MessageBubble({
   msg, isMine, allMessages, currentUserId, onReply, onEdit, onDelete, onReact,
+  isFirst, isLast, readOnly,
 }: {
   msg: Message; isMine: boolean; allMessages: Message[];
   currentUserId?: string; onReply: (m: Message) => void;
   onEdit: (m: Message) => void; onDelete: (id: string) => void;
   onReact: (msgId: string, emoji: string) => void;
+  isFirst: boolean; isLast: boolean; readOnly?: boolean;
 }) {
   const [hovered, setHovered] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -152,8 +170,8 @@ function MessageBubble({
 
   if (msg.isSystem) {
     return (
-      <div className="flex justify-center my-3">
-        <span className="text-xs text-gray-400 bg-gray-100 px-3 py-1 rounded-full">{msg.content}</span>
+      <div className="flex justify-center my-2">
+        <span className="text-[11px] text-[#8E8E93] bg-transparent px-3 py-0.5">{msg.content}</span>
       </div>
     );
   }
@@ -165,29 +183,55 @@ function MessageBubble({
     setEditing(false);
   };
 
+  // iMessage-style bubble radius
+  // Mine (right): default fully rounded, but if in a group:
+  //   - not last → bottom-right is smaller
+  //   - not first → top-right is smaller
+  // Others (left): similar but mirrored
+  const getBubbleRadius = () => {
+    if (isMine) {
+      if (isFirst && isLast) return "rounded-[22px]";
+      if (isFirst) return "rounded-[22px] rounded-br-[6px]";
+      if (isLast) return "rounded-[22px] rounded-tr-[6px]";
+      return "rounded-[22px] rounded-tr-[6px] rounded-br-[6px]";
+    } else {
+      if (isFirst && isLast) return "rounded-[22px]";
+      if (isFirst) return "rounded-[22px] rounded-bl-[6px]";
+      if (isLast) return "rounded-[22px] rounded-tl-[6px]";
+      return "rounded-[22px] rounded-tl-[6px] rounded-bl-[6px]";
+    }
+  };
+
+  const bubbleRadius = getBubbleRadius();
+
   return (
-    <div className={`flex gap-2 items-end group mb-1 ${isMine ? "flex-row-reverse" : "flex-row"}`}
-      onMouseEnter={() => setHovered(true)} onMouseLeave={() => { setHovered(false); setShowEmoji(false); }}>
+    <div
+      className={`flex gap-2 items-end group ${isMine ? "flex-row-reverse" : "flex-row"} ${isLast ? "mb-1" : "mb-[2px]"}`}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => { setHovered(false); setShowEmoji(false); }}>
 
-      {/* Avatar (others only) */}
-      {!isMine && (
-        <div className="w-8 flex-shrink-0 mb-1">
-          <UserAvatar user={msg.user} size="sm" />
-        </div>
-      )}
+      {/* Avatar (others only, last in group) */}
+      <div className="w-8 flex-shrink-0 self-end mb-0.5">
+        {!isMine && isLast && <UserAvatar user={msg.user} size="sm" />}
+      </div>
 
-      <div className={`flex flex-col max-w-[70%] ${isMine ? "items-end" : "items-start"}`}>
-        {/* Username (others only) */}
-        {!isMine && (
-          <span className="text-xs text-gray-500 mb-1 ml-1">{msg.user.displayName || msg.user.username}</span>
+      <div className={`flex flex-col max-w-[72%] ${isMine ? "items-end" : "items-start"}`}>
+        {/* Sender name (others, first in group) */}
+        {!isMine && isFirst && (
+          <span className="text-[11px] text-[#8E8E93] mb-1 ml-1 font-medium">
+            {msg.user.displayName || msg.user.username}
+          </span>
         )}
 
         {/* Reply context */}
         {replyTarget && (
-          <div className={`text-xs px-3 py-1.5 mb-1 rounded-2xl border max-w-full ${
-            isMine ? "bg-blue-50 border-blue-200 text-blue-700" : "bg-gray-100 border-gray-200 text-gray-600"
+          <div className={`text-xs px-3 py-1.5 mb-1 rounded-[14px] max-w-full border ${
+            isMine
+              ? "bg-[#007AFF]/10 border-[#007AFF]/20 text-[#007AFF]"
+              : "bg-[#F2F2F7] border-[#E5E5EA] text-[#3C3C43]"
           } truncate`}>
-            <span className="font-semibold">{replyTarget.user.displayName || replyTarget.user.username}</span>: {replyTarget.content}
+            <span className="font-semibold">{replyTarget.user.displayName || replyTarget.user.username}</span>
+            : {replyTarget.content}
           </div>
         )}
 
@@ -198,7 +242,7 @@ function MessageBubble({
               <textarea
                 ref={editRef} value={editText} onChange={e => setEditText(e.target.value)}
                 onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleEditSubmit(); } if (e.key === "Escape") setEditing(false); }}
-                className="rounded-2xl px-3.5 py-2.5 text-sm bg-white border-2 border-blue-400 outline-none resize-none min-w-[200px]"
+                className="rounded-[18px] px-4 py-2.5 text-sm bg-white border-2 border-[#007AFF] outline-none resize-none min-w-[200px]"
                 rows={2} autoFocus
               />
               <div className="flex gap-1 justify-end">
@@ -208,190 +252,323 @@ function MessageBubble({
             </div>
           ) : (
             <div
-              className={`rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed cursor-default ${
+              className={`px-[14px] py-[9px] text-[15px] leading-[1.4] cursor-default select-text ${bubbleRadius} ${
                 isMine
-                  ? "bg-blue-500 text-white rounded-br-sm"
-                  : "bg-gray-100 text-gray-900 rounded-bl-sm"
+                  ? "bg-[#007AFF] text-white"
+                  : "bg-[#E5E5EA] text-[#1C1C1E]"
               }`}
             >
               {msg.imageUrl && (
-                <img src={msg.imageUrl} alt="attachment" className="rounded-xl mb-2 max-w-[250px] max-h-[200px] object-cover cursor-pointer"
+                <img src={msg.imageUrl} alt="attachment"
+                  className="rounded-xl mb-2 max-w-[220px] max-h-[200px] object-cover cursor-pointer"
                   onClick={() => window.open(msg.imageUrl!, "_blank")} />
               )}
               <span>{msg.content}</span>
               {msg.editedAt && (
-                <button onClick={() => setShowOriginal(v => !v)}
-                  className={`text-xs ml-2 opacity-60 underline underline-offset-2 ${isMine ? "text-blue-100" : "text-gray-500"}`}>
+                <button
+                  onClick={() => setShowOriginal(v => !v)}
+                  className={`text-[10px] ml-1.5 opacity-60 underline decoration-dotted`}
+                >
                   edited
                 </button>
-              )}
-              {showOriginal && msg.originalContent && (
-                <div className={`text-xs mt-1 pt-1 border-t opacity-70 ${isMine ? "border-blue-300" : "border-gray-300"}`}>
-                  Original: {msg.originalContent}
-                </div>
               )}
             </div>
           )}
 
-          {/* Action bar */}
-          <div className={`absolute ${isMine ? "left-0 -translate-x-full pr-1" : "right-0 translate-x-full pl-1"} top-1/2 -translate-y-1/2 flex items-center gap-0.5 transition-opacity ${hovered && !editing ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
-            <div className="relative">
-              <button onClick={() => setShowEmoji(v => !v)}
-                className="p-1.5 rounded-full hover:bg-gray-200 text-gray-500 transition-colors">
-                <SmilePlus className="h-3.5 w-3.5" />
+          {/* Action buttons (hover) */}
+          {!editing && !readOnly && (
+            <div className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-0.5 ${
+              isMine ? "right-full mr-1.5" : "left-full ml-1.5"
+            } ${hovered ? "opacity-100" : "opacity-0"} transition-opacity`}>
+              {/* Emoji react */}
+              <div className="relative">
+                {showEmoji && <EmojiPicker onSelect={e => onReact(msg.id, e)} onClose={() => setShowEmoji(false)} />}
+                <button onClick={() => setShowEmoji(v => !v)}
+                  className="p-1.5 rounded-full hover:bg-[#F2F2F7] text-[#8E8E93] transition-colors">
+                  <SmilePlus className="h-4 w-4" />
+                </button>
+              </div>
+              {/* Reply */}
+              <button onClick={() => onReply(msg)}
+                className="p-1.5 rounded-full hover:bg-[#F2F2F7] text-[#8E8E93] transition-colors">
+                <Reply className="h-4 w-4" />
               </button>
-              {showEmoji && <EmojiPicker onSelect={emoji => onReact(msg.id, emoji)} onClose={() => setShowEmoji(false)} />}
+              {/* Edit / Delete (mine only) */}
+              {isMine && (
+                <>
+                  <button onClick={() => { setEditing(true); setEditText(msg.content); }}
+                    className="p-1.5 rounded-full hover:bg-[#F2F2F7] text-[#8E8E93] transition-colors">
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button onClick={() => onDelete(msg.id)}
+                    className="p-1.5 rounded-full hover:bg-[#F2F2F7] text-[#FF3B30] transition-colors">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </>
+              )}
             </div>
-            <button onClick={() => onReply(msg)}
-              className="p-1.5 rounded-full hover:bg-gray-200 text-gray-500 transition-colors">
-              <Reply className="h-3.5 w-3.5" />
-            </button>
-            {isMine && (
-              <>
-                <button onClick={() => { setEditing(true); setEditText(msg.content); }}
-                  className="p-1.5 rounded-full hover:bg-gray-200 text-gray-500 transition-colors">
-                  <Pencil className="h-3.5 w-3.5" />
-                </button>
-                <button onClick={() => onDelete(msg.id)}
-                  className="p-1.5 rounded-full hover:bg-red-100 text-gray-500 hover:text-red-500 transition-colors">
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </>
-            )}
-          </div>
+          )}
         </div>
+
+        {/* Original content on click */}
+        {showOriginal && msg.originalContent && (
+          <div className="text-[11px] text-[#8E8E93] mt-1 px-1 italic">
+            Original: {msg.originalContent}
+          </div>
+        )}
 
         {/* Reactions */}
         {Object.keys(reactionGroups).length > 0 && (
           <div className={`flex flex-wrap gap-1 mt-1 ${isMine ? "justify-end" : "justify-start"}`}>
             {Object.entries(reactionGroups).map(([emoji, { count, mine }]) => (
-              <button key={emoji} onClick={() => onReact(msg.id, emoji)}
-                className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-colors ${
-                  mine ? "bg-blue-100 border-blue-300 text-blue-700" : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+              <button
+                key={emoji}
+                onClick={() => !readOnly && onReact(msg.id, emoji)}
+                className={`flex items-center gap-0.5 text-xs px-2 py-0.5 rounded-full border transition-colors ${
+                  mine
+                    ? "bg-[#007AFF]/10 border-[#007AFF]/30 text-[#007AFF]"
+                    : "bg-[#F2F2F7] border-[#E5E5EA] text-[#3C3C43]"
                 }`}>
-                {emoji} {count > 1 && <span>{count}</span>}
+                <span>{emoji}</span>
+                {count > 1 && <span className="font-medium">{count}</span>}
               </button>
             ))}
           </div>
         )}
 
-        {/* Timestamp */}
-        <span className={`text-[10px] text-gray-400 mt-0.5 ${isMine ? "mr-1" : "ml-1"}`}>
-          {formatTime(msg.createdAt)}
-        </span>
+        {/* Timestamp (last in group or single) */}
+        {isLast && (
+          <div className={`text-[10px] text-[#8E8E93] mt-1 ${isMine ? "pr-1" : "pl-1"}`}>
+            {formatTime(msg.createdAt)}
+            {isMine && msg.editedAt && <span className="ml-1">· edited</span>}
+          </div>
+        )}
       </div>
-
-      {/* Spacer for own messages */}
-      {isMine && <div className="w-8 flex-shrink-0" />}
     </div>
   );
 }
 
-// ─── ConversationItem ─────────────────────────────────────────────────────────
+// ─── MessageInput ─────────────────────────────────────────────────────────────
 
-function ConversationItem({ conv, isActive, onClick, currentUserId }: {
-  conv: Conversation; isActive: boolean; onClick: () => void; currentUserId?: string;
+function MessageInput({
+  onSend, replyTo, onCancelReply, disabled,
+}: {
+  onSend: (text: string, imageUrl?: string | null) => void;
+  replyTo: Message | null;
+  onCancelReply: () => void;
+  disabled?: boolean;
 }) {
-  const lastMsg = conv.lastMessage;
-  const previewText = lastMsg
-    ? lastMsg.isSystem ? lastMsg.content
-    : lastMsg.imageUrl && !lastMsg.content ? "Image"
-    : lastMsg.content
-    : "No messages yet";
+  const [text, setText] = useState("");
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const textRef = useRef<HTMLTextAreaElement>(null);
 
-  const ConvAvatar = () => {
-    if (conv.type === "everyone") {
-      return (
-        <div className="h-10 w-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center flex-shrink-0">
-          <Users className="h-5 w-5 text-white" />
-        </div>
-      );
+  const handleSend = () => {
+    if (!text.trim() && !imageUrl) return;
+    onSend(text.trim(), imageUrl);
+    setText("");
+    setImageUrl(null);
+    setTimeout(() => textRef.current?.focus(), 50);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
     }
-    if (conv.type === "group") {
-      return (
-        <div className="h-10 w-10 rounded-full bg-gradient-to-br from-green-400 to-blue-500 flex items-center justify-center flex-shrink-0">
-          <span className="text-white font-bold text-sm">{(conv.displayName || conv.name || "G").slice(0, 2).toUpperCase()}</span>
-        </div>
-      );
-    }
-    const other = conv.members?.find(m => m.id !== currentUserId);
-    return (
-      <Avatar className="h-10 w-10 flex-shrink-0">
-        {other?.avatarUrl && <AvatarImage src={other.avatarUrl} />}
-        <AvatarFallback className="bg-gray-200 text-gray-600 font-semibold">
-          {initials(other || { id: "", username: "?" })}
-        </AvatarFallback>
-      </Avatar>
-    );
+  };
+
+  const handleImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { alert("Max 5MB"); return; }
+    setUploading(true);
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const res = await apiRequest("POST", "/api/upload", { dataUrl: reader.result, filename: file.name });
+        const data = await res.json();
+        setImageUrl(data.url);
+      } catch { alert("Upload failed"); }
+      setUploading(false);
+    };
+    reader.readAsDataURL(file);
   };
 
   return (
-    <button onClick={onClick} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-left transition-colors ${
-      isActive ? "bg-blue-50 border border-blue-100" : "hover:bg-gray-50"
-    }`}>
-      <ConvAvatar />
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between gap-1">
-          <span className="font-semibold text-sm text-gray-900 truncate">
-            {conv.displayName || conv.name || "Conversation"}
-          </span>
-          {lastMsg && (
-            <span className="text-[10px] text-gray-400 flex-shrink-0">{formatTime(lastMsg.createdAt)}</span>
-          )}
+    <div className="border-t border-[#E5E5EA] bg-white px-3 py-2">
+      {/* Reply preview */}
+      {replyTo && (
+        <div className="flex items-center justify-between px-3 py-2 mb-2 bg-[#F2F2F7] rounded-[14px]">
+          <div className="flex-1 min-w-0">
+            <span className="text-[11px] font-semibold text-[#007AFF]">
+              {replyTo.user.displayName || replyTo.user.username}
+            </span>
+            <p className="text-[11px] text-[#8E8E93] truncate">{replyTo.content}</p>
+          </div>
+          <button onClick={onCancelReply} className="ml-2 p-1 text-[#8E8E93] hover:text-[#3C3C43]">
+            <X className="h-3.5 w-3.5" />
+          </button>
         </div>
-        <p className="text-xs text-gray-500 truncate">{previewText}</p>
+      )}
+
+      {/* Image preview */}
+      {imageUrl && (
+        <div className="relative mb-2 w-fit">
+          <img src={imageUrl} className="rounded-[14px] max-h-24 max-w-[200px] object-cover" />
+          <button onClick={() => setImageUrl(null)}
+            className="absolute -top-1.5 -right-1.5 bg-[#8E8E93] text-white rounded-full p-0.5">
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
+
+      <div className="flex items-end gap-2">
+        <button onClick={() => fileRef.current?.click()} disabled={uploading}
+          className="p-2 text-[#007AFF] hover:bg-[#F2F2F7] rounded-full transition-colors flex-shrink-0">
+          {uploading ? <div className="h-5 w-5 border-2 border-[#007AFF] border-t-transparent rounded-full animate-spin" /> : <ImageIcon className="h-5 w-5" />}
+        </button>
+        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleImage} />
+
+        <div className="flex-1 flex items-end bg-white border border-[#C7C7CC] rounded-[22px] px-3 py-1.5">
+          <textarea
+            ref={textRef}
+            value={text}
+            onChange={e => setText(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={disabled ? "Sign in to message..." : "iMessage"}
+            disabled={disabled}
+            rows={1}
+            className="flex-1 bg-transparent text-[15px] text-[#1C1C1E] placeholder-[#8E8E93] outline-none resize-none max-h-28 leading-[1.4] py-0.5"
+            style={{ fieldSizing: "content" } as React.CSSProperties}
+          />
+        </div>
+
+        <button
+          onClick={handleSend}
+          disabled={!text.trim() && !imageUrl}
+          className={`p-2 rounded-full flex-shrink-0 transition-colors ${
+            text.trim() || imageUrl
+              ? "bg-[#007AFF] text-white"
+              : "bg-[#E5E5EA] text-[#8E8E93]"
+          }`}>
+          <Send className="h-4 w-4" />
+        </button>
       </div>
-    </button>
+    </div>
   );
 }
 
 // ─── UserSearchInput ──────────────────────────────────────────────────────────
 
-function UserSearchInput({ onSelect, excluded = [], label = "Search users..." }: {
-  onSelect: (user: UserMeta) => void;
+function UserSearchInput({ onSelect, excluded = [], label }: {
+  onSelect: (u: UserMeta) => void;
   excluded?: string[];
   label?: string;
 }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<UserMeta[]>([]);
-  const [loading, setLoading] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    clearTimeout(timerRef.current);
-    if (!q.trim()) { setResults([]); return; }
-    setLoading(true);
-    timerRef.current = setTimeout(async () => {
+    if (timer.current) clearTimeout(timer.current);
+    if (q.length < 1) { setResults([]); return; }
+    timer.current = setTimeout(async () => {
       try {
         const res = await fetch(`/api/users/search?q=${encodeURIComponent(q)}`);
-        const data = await res.json();
-        setResults((data as UserMeta[]).filter(u => !excluded.includes(u.id)));
-      } catch {} finally { setLoading(false); }
+        if (res.ok) {
+          const data: UserMeta[] = await res.json();
+          setResults(data.filter(u => !excluded.includes(u.id)));
+        }
+      } catch {}
     }, 250);
+    return () => { if (timer.current) clearTimeout(timer.current); };
   }, [q, excluded.join(",")]);
 
+  useEffect(() => {
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setResults([]); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+
   return (
-    <div className="relative">
-      <div className="flex items-center gap-2 px-3 py-2 bg-gray-100 rounded-xl">
-        <Search className="h-4 w-4 text-gray-400" />
-        <input value={q} onChange={e => setQ(e.target.value)} placeholder={label}
-          className="flex-1 bg-transparent text-sm outline-none placeholder-gray-400" />
-      </div>
+    <div ref={ref} className="relative">
+      <input value={q} onChange={e => setQ(e.target.value)}
+        placeholder={label || "Search users..."}
+        className="w-full px-4 py-2.5 bg-[#F2F2F7] rounded-[14px] text-sm outline-none text-[#1C1C1E] placeholder-[#8E8E93]" />
       {results.length > 0 && (
-        <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-50 overflow-hidden">
+        <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-[#E5E5EA] rounded-[14px] shadow-lg z-50 overflow-hidden">
           {results.map(u => (
             <button key={u.id} onClick={() => { onSelect(u); setQ(""); setResults([]); }}
-              className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 transition-colors">
+              className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-[#F2F2F7] transition-colors">
               <UserAvatar user={u} size="sm" />
               <div className="text-left">
-                <div className="text-sm font-semibold text-gray-900">{u.displayName || u.username}</div>
-                {u.displayName && <div className="text-xs text-gray-500">@{u.username}</div>}
+                <div className="text-sm font-semibold text-[#1C1C1E]">{u.displayName || u.username}</div>
+                {u.displayName && <div className="text-xs text-[#8E8E93]">@{u.username}</div>}
               </div>
             </button>
           ))}
         </div>
       )}
     </div>
+  );
+}
+
+// ─── ConversationItem ─────────────────────────────────────────────────────────
+
+function ConversationItem({ conv, isActive, currentUserId, onClick }: {
+  conv: Conversation;
+  isActive: boolean;
+  currentUserId?: string;
+  onClick: () => void;
+}) {
+  const other = conv.type === "dm" ? conv.members?.find(m => m.id !== currentUserId) : null;
+  const name = conv.displayName || conv.name
+    || (other ? (other.displayName || other.username) : null)
+    || "Conversation";
+  const lastMsg = conv.lastMessage;
+
+  return (
+    <button
+      onClick={onClick}
+      data-testid={`conv-item-${conv.id}`}
+      className={`w-full flex items-center gap-3 px-3 py-3 rounded-[14px] text-left transition-colors ${
+        isActive ? "bg-[#007AFF]/10" : "hover:bg-[#F2F2F7]"
+      }`}>
+      {/* Avatar */}
+      {conv.type === "everyone" ? (
+        <div className="h-11 w-11 rounded-full bg-[#007AFF] flex items-center justify-center flex-shrink-0">
+          <Users className="h-5 w-5 text-white" />
+        </div>
+      ) : conv.type === "dm" && other ? (
+        <Avatar className="h-11 w-11 flex-shrink-0">
+          {other.avatarUrl && <AvatarImage src={other.avatarUrl} />}
+          <AvatarFallback className="bg-[#E5E5EA] text-[#3C3C43] font-semibold text-sm">{initials(other)}</AvatarFallback>
+        </Avatar>
+      ) : (
+        <div className="h-11 w-11 rounded-full bg-[#34C759] flex items-center justify-center flex-shrink-0">
+          <span className="text-white font-bold text-sm">{name.slice(0, 2).toUpperCase()}</span>
+        </div>
+      )}
+
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between gap-2">
+          <span className={`text-[15px] font-semibold truncate ${isActive ? "text-[#007AFF]" : "text-[#1C1C1E]"}`}>
+            {name}
+          </span>
+          {lastMsg && (
+            <span className="text-[12px] text-[#8E8E93] flex-shrink-0">{formatTime(lastMsg.createdAt)}</span>
+          )}
+        </div>
+        {lastMsg && (
+          <p className="text-[13px] text-[#8E8E93] truncate">
+            {lastMsg.isSystem ? lastMsg.content : (lastMsg.imageUrl ? "Photo" : lastMsg.content)}
+          </p>
+        )}
+      </div>
+    </button>
   );
 }
 
@@ -435,59 +612,67 @@ function NewConversationModal({ onClose, onCreated }: {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-[400px] max-h-[600px] flex flex-col" onClick={e => e.stopPropagation()}>
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-gray-100">
-          <h2 className="text-lg font-bold text-gray-900">New Message</h2>
-          <button onClick={onClose} className="p-1.5 rounded-full hover:bg-gray-100 text-gray-500"><X className="h-5 w-5" /></button>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white rounded-t-[28px] sm:rounded-[28px] shadow-2xl w-full sm:w-[400px] max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 pt-5 pb-4">
+          <h2 className="text-[17px] font-semibold text-[#1C1C1E]">New Message</h2>
+          <button onClick={onClose} className="p-1.5 rounded-full hover:bg-[#F2F2F7] text-[#8E8E93]">
+            <X className="h-5 w-5" />
+          </button>
         </div>
 
-        {/* Tabs */}
-        <div className="flex mx-5 mt-4 bg-gray-100 rounded-xl p-1 gap-1">
-          <button onClick={() => setTab("dm")} className={`flex-1 text-sm font-medium py-1.5 rounded-lg transition-colors ${tab === "dm" ? "bg-white shadow text-gray-900" : "text-gray-500"}`}>
+        <div className="flex mx-5 mb-4 bg-[#F2F2F7] rounded-[12px] p-1 gap-1">
+          <button onClick={() => setTab("dm")} className={`flex-1 text-[13px] font-medium py-1.5 rounded-[9px] transition-colors ${tab === "dm" ? "bg-white shadow-sm text-[#1C1C1E]" : "text-[#8E8E93]"}`}>
             Direct Message
           </button>
-          <button onClick={() => setTab("group")} className={`flex-1 text-sm font-medium py-1.5 rounded-lg transition-colors ${tab === "group" ? "bg-white shadow text-gray-900" : "text-gray-500"}`}>
+          <button onClick={() => setTab("group")} className={`flex-1 text-[13px] font-medium py-1.5 rounded-[9px] transition-colors ${tab === "group" ? "bg-white shadow-sm text-[#1C1C1E]" : "text-[#8E8E93]"}`}>
             Group Chat
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 pt-4 pb-5 flex flex-col gap-4">
+        <div className="flex-1 overflow-y-auto px-5 pb-5 flex flex-col gap-4">
           {tab === "dm" ? (
             <>
               <UserSearchInput onSelect={setSelectedUser} label="Search by username..." />
               {selectedUser && (
-                <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-xl border border-blue-100">
+                <div className="flex items-center gap-3 p-3 bg-[#F2F2F7] rounded-[14px]">
                   <UserAvatar user={selectedUser} size="md" />
                   <div>
-                    <div className="font-semibold text-gray-900">{selectedUser.displayName || selectedUser.username}</div>
-                    {selectedUser.displayName && <div className="text-xs text-gray-500">@{selectedUser.username}</div>}
+                    <div className="font-semibold text-[#1C1C1E] text-[15px]">{selectedUser.displayName || selectedUser.username}</div>
+                    {selectedUser.displayName && <div className="text-xs text-[#8E8E93]">@{selectedUser.username}</div>}
                   </div>
-                  <button onClick={() => setSelectedUser(null)} className="ml-auto p-1 rounded-full hover:bg-blue-100 text-blue-500"><X className="h-4 w-4" /></button>
+                  <button onClick={() => setSelectedUser(null)} className="ml-auto p-1 rounded-full hover:bg-[#E5E5EA] text-[#8E8E93]">
+                    <X className="h-4 w-4" />
+                  </button>
                 </div>
               )}
-              <Button onClick={createDm} disabled={!selectedUser || loading} className="w-full rounded-xl">
+              <Button onClick={createDm} disabled={!selectedUser || loading}
+                className="w-full rounded-full bg-[#007AFF] hover:bg-[#007AFF] text-white font-semibold">
                 {loading ? "Starting..." : "Start Conversation"}
               </Button>
             </>
           ) : (
             <>
               <input value={groupName} onChange={e => setGroupName(e.target.value)}
-                placeholder="Group chat name..." className="w-full px-4 py-2.5 bg-gray-100 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-300" />
-              <UserSearchInput onSelect={u => setGroupMembers(prev => prev.find(m => m.id === u.id) ? prev : [...prev, u])}
+                placeholder="Group chat name..."
+                className="w-full px-4 py-2.5 bg-[#F2F2F7] rounded-[14px] text-sm outline-none text-[#1C1C1E] placeholder-[#8E8E93]" />
+              <UserSearchInput
+                onSelect={u => setGroupMembers(prev => prev.find(m => m.id === u.id) ? prev : [...prev, u])}
                 excluded={groupMembers.map(m => m.id)} label="Add members..." />
               {groupMembers.length > 0 && (
                 <div className="flex flex-wrap gap-2">
                   {groupMembers.map(m => (
-                    <div key={m.id} className="flex items-center gap-1.5 bg-blue-100 text-blue-700 rounded-full px-2.5 py-1 text-xs font-medium">
+                    <div key={m.id} className="flex items-center gap-1.5 bg-[#F2F2F7] rounded-full px-3 py-1 text-[13px] text-[#1C1C1E]">
                       {m.displayName || m.username}
-                      <button onClick={() => setGroupMembers(prev => prev.filter(x => x.id !== m.id))}><X className="h-3 w-3" /></button>
+                      <button onClick={() => setGroupMembers(prev => prev.filter(x => x.id !== m.id))} className="text-[#8E8E93] hover:text-[#3C3C43]">
+                        <X className="h-3 w-3" />
+                      </button>
                     </div>
                   ))}
                 </div>
               )}
-              <Button onClick={createGroup} disabled={!groupName.trim() || groupMembers.length === 0 || loading} className="w-full rounded-xl">
+              <Button onClick={createGroup} disabled={!groupName.trim() || groupMembers.length === 0 || loading}
+                className="w-full rounded-full bg-[#007AFF] hover:bg-[#007AFF] text-white font-semibold">
                 {loading ? "Creating..." : `Create Group${groupMembers.length > 0 ? ` (${groupMembers.length + 1})` : ""}`}
               </Button>
             </>
@@ -498,202 +683,108 @@ function NewConversationModal({ onClose, onCreated }: {
   );
 }
 
-// ─── MessageInput ─────────────────────────────────────────────────────────────
-
-function MessageInput({ onSend, replyTo, onCancelReply, disabled }: {
-  onSend: (content: string, imageUrl?: string, replyToId?: string) => void;
-  replyTo: Message | null;
-  onCancelReply: () => void;
-  disabled?: boolean;
-}) {
-  const [text, setText] = useState("");
-  const [imageUrl, setImageUrl] = useState("");
-  const [uploading, setUploading] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const textRef = useRef<HTMLTextAreaElement>(null);
-  const { toast } = useToast();
-
-  const handleSend = () => {
-    if (!text.trim() && !imageUrl) return;
-    onSend(text.trim(), imageUrl || undefined, replyTo?.id);
-    setText("");
-    setImageUrl("");
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
-  };
-
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async () => {
-      setUploading(true);
-      try {
-        const res = await apiRequest("POST", "/api/upload", { dataUrl: reader.result, filename: file.name });
-        const data = await res.json();
-        setImageUrl(data.url);
-      } catch { toast({ title: "Upload failed", variant: "destructive" }); }
-      setUploading(false);
-    };
-    reader.readAsDataURL(file);
-    e.target.value = "";
-  };
-
-  return (
-    <div className="px-4 pb-4 pt-2">
-      {/* Reply preview */}
-      {replyTo && (
-        <div className="flex items-center gap-2 mb-2 px-3 py-2 bg-blue-50 rounded-xl border border-blue-100">
-          <div className="w-1 h-full bg-blue-400 rounded-full flex-shrink-0" />
-          <Reply className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />
-          <div className="flex-1 min-w-0">
-            <span className="text-xs font-semibold text-blue-600">{replyTo.user.displayName || replyTo.user.username}</span>
-            <p className="text-xs text-gray-600 truncate">{replyTo.content}</p>
-          </div>
-          <button onClick={onCancelReply} className="p-1 rounded-full hover:bg-blue-100 text-blue-400"><X className="h-3.5 w-3.5" /></button>
-        </div>
-      )}
-
-      {/* Image preview */}
-      {imageUrl && (
-        <div className="relative inline-block mb-2">
-          <img src={imageUrl} alt="attachment" className="h-20 w-20 object-cover rounded-xl border border-gray-200" />
-          <button onClick={() => setImageUrl("")}
-            className="absolute -top-1.5 -right-1.5 bg-gray-700 text-white rounded-full p-0.5"><X className="h-3 w-3" /></button>
-        </div>
-      )}
-
-      <div className="flex items-end gap-2">
-        {/* Image button */}
-        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
-        <button onClick={() => fileRef.current?.click()} disabled={uploading || disabled}
-          className="p-2.5 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500 transition-colors flex-shrink-0 mb-0.5">
-          <ImageIcon className="h-5 w-5" />
-        </button>
-
-        {/* Text input */}
-        <div className="flex-1 bg-gray-100 rounded-2xl px-4 py-2.5 flex items-end gap-2">
-          <textarea ref={textRef} value={text} onChange={e => setText(e.target.value)} onKeyDown={handleKeyDown}
-            placeholder={disabled ? "Sign in to send messages..." : "iMessage"}
-            disabled={disabled}
-            rows={1}
-            style={{ resize: "none", maxHeight: "120px", overflow: "auto" }}
-            className="flex-1 bg-transparent text-sm outline-none placeholder-gray-400 min-w-0 disabled:cursor-not-allowed"
-            onInput={e => {
-              const t = e.target as HTMLTextAreaElement;
-              t.style.height = "auto";
-              t.style.height = Math.min(t.scrollHeight, 120) + "px";
-            }}
-          />
-        </div>
-
-        {/* Send button */}
-        <button onClick={handleSend} disabled={(!text.trim() && !imageUrl) || disabled}
-          className={`p-2.5 rounded-full flex-shrink-0 mb-0.5 transition-all ${
-            (text.trim() || imageUrl) && !disabled
-              ? "bg-blue-500 hover:bg-blue-600 text-white shadow-md"
-              : "bg-gray-100 text-gray-300 cursor-not-allowed"
-          }`}>
-          <Send className="h-5 w-5" />
-        </button>
-      </div>
-    </div>
-  );
-}
-
 // ─── ConversationThread ───────────────────────────────────────────────────────
 
-function ConversationThread({ conv, currentUser, onBack }: {
-  conv: Conversation;
-  currentUser: { id: string; username: string; displayName?: string | null; avatarUrl?: string | null } | null;
+function ConversationThread({ conv, currentUser, onBack, readOnly }: {
+  conv: Conversation & { messages?: Message[] };
+  currentUser: UserMeta | null;
   onBack: () => void;
+  readOnly?: boolean;
 }) {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [messages, setMessages] = useState<Message[]>(conv.messages || []);
+  const [loading, setLoading] = useState(!conv.messages);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [showInfo, setShowInfo] = useState(false);
   const [addingMember, setAddingMember] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
-  // Fetch messages
-  const fetchMessages = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/conversations/${conv.id}/messages`);
-      if (res.ok) setMessages(await res.json());
-    } catch {} finally { setLoading(false); }
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    bottomRef.current?.scrollIntoView({ behavior, block: "end" });
+  }, []);
+
+  useEffect(() => {
+    if (!conv.messages) {
+      setLoading(true);
+      fetch(`/api/conversations/${conv.id}/messages`, { credentials: "include" })
+        .then(r => r.json())
+        .then((data: Message[]) => { setMessages(data); setLoading(false); })
+        .catch(() => setLoading(false));
+    }
   }, [conv.id]);
 
   useEffect(() => {
-    setMessages([]);
-    setLoading(true);
-    fetchMessages();
-  }, [conv.id]);
+    scrollToBottom("instant");
+  }, [conv.id, loading]);
 
-  // SSE for live updates
   useEffect(() => {
+    if (messages.length > 0) scrollToBottom();
+  }, [messages.length]);
+
+  // SSE for real-time messages
+  useEffect(() => {
+    if (readOnly) return;
+    if (!currentUser) return;
     const es = new EventSource("/api/messages/sse");
     es.addEventListener("message", e => {
       const msg = JSON.parse(e.data) as Message;
-      if (msg.conversationId === conv.id) {
-        setMessages(prev => {
-          if (prev.find(m => m.id === msg.id)) return prev;
-          return [...prev, msg];
-        });
-      }
+      if (msg.conversationId !== conv.id) return;
+      setMessages(prev => prev.find(m => m.id === msg.id) ? prev : [...prev, msg]);
     });
     es.addEventListener("message_edited", e => {
-      const msg = JSON.parse(e.data) as Message;
-      if (msg.conversationId === conv.id) {
-        setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, ...msg } : m));
-      }
+      const { messageId, content, editedAt, originalContent } = JSON.parse(e.data);
+      if (messageId) setMessages(prev => prev.map(m =>
+        m.id === messageId ? { ...m, content, editedAt, originalContent } : m
+      ));
     });
     es.addEventListener("message_deleted", e => {
-      const { id, conversationId } = JSON.parse(e.data);
-      if (conversationId === conv.id) setMessages(prev => prev.filter(m => m.id !== id));
+      const { messageId } = JSON.parse(e.data);
+      if (messageId) setMessages(prev => prev.filter(m => m.id !== messageId));
     });
-    es.addEventListener("reactions_updated", e => {
-      const { messageId, reactions, conversationId } = JSON.parse(e.data);
-      if (conversationId === conv.id) {
-        setMessages(prev => prev.map(m => m.id === messageId ? { ...m, reactions } : m));
-      }
+    es.addEventListener("reaction_added", e => {
+      const reaction = JSON.parse(e.data) as MessageReaction;
+      setMessages(prev => prev.map(m =>
+        m.id === reaction.messageId ? { ...m, reactions: [...m.reactions.filter(r => !(r.userId === reaction.userId && r.emoji === reaction.emoji)), reaction] } : m
+      ));
+    });
+    es.addEventListener("reaction_removed", e => {
+      const { messageId, userId, emoji } = JSON.parse(e.data);
+      setMessages(prev => prev.map(m =>
+        m.id === messageId ? { ...m, reactions: m.reactions.filter(r => !(r.userId === userId && r.emoji === emoji)) } : m
+      ));
     });
     return () => es.close();
-  }, [conv.id]);
+  }, [conv.id, currentUser?.id, readOnly]);
 
-  // Scroll to bottom
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length]);
-
-  const handleSend = async (content: string, imageUrl?: string, replyToId?: string) => {
+  const handleSend = async (content: string, imageUrl?: string | null) => {
     if (!currentUser) return;
     try {
-      await apiRequest("POST", `/api/conversations/${conv.id}/messages`, { content, imageUrl, replyToId });
+      const res = await apiRequest("POST", `/api/conversations/${conv.id}/messages`, {
+        content, imageUrl: imageUrl || null, replyToId: replyTo?.id || null,
+      });
+      const msg: Message = await res.json();
+      setMessages(prev => prev.find(m => m.id === msg.id) ? prev : [...prev, msg]);
       setReplyTo(null);
     } catch { toast({ title: "Failed to send", variant: "destructive" }); }
   };
 
   const handleEdit = async (msg: Message) => {
     try {
-      await apiRequest("PATCH", `/api/messages/${msg.id}`, { content: msg.content });
+      await apiRequest("PATCH", `/api/conversations/${conv.id}/messages/${msg.id}`, { content: msg.content });
+      setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, content: msg.content, editedAt: new Date().toISOString() } : m));
     } catch { toast({ title: "Failed to edit", variant: "destructive" }); }
   };
 
   const handleDelete = async (id: string) => {
     try {
-      await apiRequest("DELETE", `/api/messages/${id}`);
+      await apiRequest("DELETE", `/api/conversations/${conv.id}/messages/${id}`);
+      setMessages(prev => prev.filter(m => m.id !== id));
     } catch { toast({ title: "Failed to delete", variant: "destructive" }); }
   };
 
   const handleReact = async (msgId: string, emoji: string) => {
-    if (!currentUser) return;
     try {
-      const res = await apiRequest("POST", `/api/messages/${msgId}/reactions`, { emoji });
-      const { reactions } = await res.json();
-      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, reactions } : m));
+      await apiRequest("POST", `/api/conversations/${conv.id}/messages/${msgId}/react`, { emoji });
     } catch {}
   };
 
@@ -705,7 +796,6 @@ function ConversationThread({ conv, currentUser, onBack }: {
     } catch { toast({ title: "Failed to add member", variant: "destructive" }); }
   };
 
-  // Conversation header display
   const isEveryoneConv = conv.type === "everyone";
   const isDm = conv.type === "dm";
   const other = isDm ? conv.members?.find(m => m.id !== currentUser?.id) : null;
@@ -713,40 +803,42 @@ function ConversationThread({ conv, currentUser, onBack }: {
   const memberCount = conv.members?.length || 0;
 
   return (
-    <div className="flex flex-col h-full min-h-0">
-      {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 bg-white">
-        <button onClick={onBack} className="p-1.5 rounded-full hover:bg-gray-100 text-gray-500 md:hidden">
+    <div className="flex flex-col h-full min-h-0 bg-white">
+      {/* Header — iOS style */}
+      <div className="flex flex-col items-center px-4 pt-3 pb-2 border-b border-[#E5E5EA] bg-white relative">
+        <button onClick={onBack}
+          className="absolute left-2 top-3 p-1.5 rounded-full hover:bg-[#F2F2F7] text-[#007AFF] md:hidden">
           <ChevronLeft className="h-5 w-5" />
         </button>
 
-        {/* Avatar area */}
-        {isEveryoneConv ? (
-          <div className="h-10 w-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center flex-shrink-0">
-            <Users className="h-5 w-5 text-white" />
+        {/* Center avatar + name */}
+        <div className="flex flex-col items-center gap-1">
+          {isEveryoneConv ? (
+            <div className="h-12 w-12 rounded-full bg-[#007AFF] flex items-center justify-center">
+              <Users className="h-6 w-6 text-white" />
+            </div>
+          ) : isDm && other ? (
+            <Avatar className="h-12 w-12">
+              {other.avatarUrl && <AvatarImage src={other.avatarUrl} />}
+              <AvatarFallback className="bg-[#E5E5EA] text-[#3C3C43] font-semibold">{initials(other)}</AvatarFallback>
+            </Avatar>
+          ) : (
+            <div className="h-12 w-12 rounded-full bg-[#34C759] flex items-center justify-center">
+              <span className="text-white font-bold">{headerTitle.slice(0, 2).toUpperCase()}</span>
+            </div>
+          )}
+          <div className="text-center">
+            <h2 className="text-[13px] font-semibold text-[#1C1C1E]">{headerTitle}</h2>
+            <p className="text-[11px] text-[#8E8E93]">
+              {isEveryoneConv ? `${memberCount} members` : isDm ? (other?.username ? `@${other.username}` : "Direct Message") : `${memberCount} members`}
+            </p>
           </div>
-        ) : isDm && other ? (
-          <Avatar className="h-10 w-10">
-            {other.avatarUrl && <AvatarImage src={other.avatarUrl} />}
-            <AvatarFallback className="bg-gray-200 font-semibold">{initials(other)}</AvatarFallback>
-          </Avatar>
-        ) : (
-          <div className="h-10 w-10 rounded-full bg-gradient-to-br from-green-400 to-blue-500 flex items-center justify-center flex-shrink-0">
-            <span className="text-white font-bold text-sm">{headerTitle.slice(0, 2).toUpperCase()}</span>
-          </div>
-        )}
-
-        <div className="flex-1 min-w-0">
-          <h2 className="font-semibold text-gray-900 text-sm truncate">{headerTitle}</h2>
-          <p className="text-xs text-gray-500">
-            {isEveryoneConv ? `${memberCount} members` : isDm ? (other?.displayName ? `@${other.username}` : "Direct Message") : `${memberCount} members`}
-          </p>
         </div>
 
-        {/* Info button for groups */}
+        {/* Info button */}
         {!isDm && (
           <button onClick={() => setShowInfo(v => !v)}
-            className={`p-2 rounded-full transition-colors ${showInfo ? "bg-blue-100 text-blue-600" : "hover:bg-gray-100 text-gray-500"}`}>
+            className={`absolute right-3 top-3 p-1.5 rounded-full transition-colors ${showInfo ? "bg-[#007AFF]/10 text-[#007AFF]" : "hover:bg-[#F2F2F7] text-[#8E8E93]"}`}>
             <Info className="h-5 w-5" />
           </button>
         )}
@@ -754,12 +846,12 @@ function ConversationThread({ conv, currentUser, onBack }: {
 
       {/* Group info panel */}
       {showInfo && !isDm && (
-        <div className="border-b border-gray-100 bg-gray-50 px-4 py-3">
+        <div className="border-b border-[#E5E5EA] bg-[#F2F2F7] px-4 py-3">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Members ({memberCount})</span>
+            <span className="text-[11px] font-semibold text-[#8E8E93] uppercase tracking-wide">Members ({memberCount})</span>
             {!isEveryoneConv && currentUser && (
               <button onClick={() => setAddingMember(v => !v)}
-                className="flex items-center gap-1 text-xs text-blue-600 font-medium hover:text-blue-700">
+                className="flex items-center gap-1 text-[12px] text-[#007AFF] font-medium">
                 <UserPlus className="h-3.5 w-3.5" /> Add
               </button>
             )}
@@ -771,69 +863,90 @@ function ConversationThread({ conv, currentUser, onBack }: {
           )}
           <div className="flex flex-wrap gap-2">
             {conv.members?.map(m => (
-              <div key={m.id} className="flex items-center gap-1.5 bg-white rounded-full px-2.5 py-1 border border-gray-200 text-xs text-gray-700">
+              <div key={m.id} className="flex items-center gap-1.5 bg-white rounded-full px-2.5 py-1 text-[12px] text-[#1C1C1E]">
                 <Avatar className="h-5 w-5">
                   {m.avatarUrl && <AvatarImage src={m.avatarUrl} />}
-                  <AvatarFallback className="text-[9px] bg-blue-100 text-blue-700">{initials(m)}</AvatarFallback>
+                  <AvatarFallback className="text-[9px] bg-[#E5E5EA] text-[#3C3C43]">{initials(m)}</AvatarFallback>
                 </Avatar>
                 {m.displayName || m.username}
-                {m.id === currentUser?.id && <span className="text-gray-400">(you)</span>}
+                {m.id === currentUser?.id && <span className="text-[#8E8E93]">(you)</span>}
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Messages area — flex-1 with min-h-0 so it can shrink; inner div pushes content to bottom */}
+      {/* Messages */}
       <div className="flex-1 overflow-y-auto min-h-0">
-        <div className="flex flex-col justify-end min-h-full px-4 py-4">
+        <div className="flex flex-col justify-end min-h-full px-3 py-4">
           {loading ? (
             <div className="flex items-center justify-center py-16">
-              <div className="text-gray-400 text-sm">Loading messages...</div>
+              <div className="text-[#8E8E93] text-sm">Loading messages...</div>
             </div>
           ) : messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 gap-2">
-              <div className="h-16 w-16 rounded-full bg-gray-100 flex items-center justify-center">
-                <MessageSquarePlus className="h-8 w-8 text-gray-300" />
+              <div className="h-16 w-16 rounded-full bg-[#F2F2F7] flex items-center justify-center">
+                <MessageSquarePlus className="h-8 w-8 text-[#C7C7CC]" />
               </div>
-              <p className="text-gray-400 text-sm">No messages yet — say hi!</p>
+              <p className="text-[#8E8E93] text-sm">No messages yet</p>
             </div>
           ) : (
-            <div className="flex flex-col gap-0.5">
-              {messages.map((msg, i) => (
-                <div key={msg.id}>
-                  {shouldShowDateSeparator(messages, i) && (
-                    <div className="flex items-center gap-3 my-4">
-                      <div className="flex-1 h-px bg-gray-200" />
-                      <span className="text-xs text-gray-400 font-medium">{formatDateSeparator(msg.createdAt)}</span>
-                      <div className="flex-1 h-px bg-gray-200" />
-                    </div>
-                  )}
-                  <MessageBubble
-                    msg={msg}
-                    isMine={msg.userId === currentUser?.id}
-                    allMessages={messages}
-                    currentUserId={currentUser?.id}
-                    onReply={setReplyTo}
-                    onEdit={handleEdit}
-                    onDelete={handleDelete}
-                    onReact={handleReact}
-                  />
-                </div>
-              ))}
+            <div className="flex flex-col gap-0">
+              {messages.map((msg, i) => {
+                const first = isGroupBreak(messages, i) || msg.isSystem;
+                const last = isNextGroupBreak(messages, i) || msg.isSystem;
+                return (
+                  <div key={msg.id}>
+                    {shouldShowDateSeparator(messages, i) && (
+                      <div className="flex items-center gap-2 my-4">
+                        <div className="flex-1 h-px bg-[#E5E5EA]" />
+                        <span className="text-[11px] text-[#8E8E93] font-medium">{formatDateSeparator(msg.createdAt)}</span>
+                        <div className="flex-1 h-px bg-[#E5E5EA]" />
+                      </div>
+                    )}
+                    {first && !msg.isSystem && i > 0 && <div className="h-2" />}
+                    <MessageBubble
+                      msg={msg}
+                      isMine={msg.userId === currentUser?.id}
+                      allMessages={messages}
+                      currentUserId={currentUser?.id}
+                      onReply={setReplyTo}
+                      onEdit={handleEdit}
+                      onDelete={handleDelete}
+                      onReact={handleReact}
+                      isFirst={first}
+                      isLast={last}
+                      readOnly={readOnly}
+                    />
+                  </div>
+                );
+              })}
             </div>
           )}
           <div ref={bottomRef} />
         </div>
       </div>
 
-      {/* Input */}
-      <MessageInput
-        onSend={handleSend}
-        replyTo={replyTo}
-        onCancelReply={() => setReplyTo(null)}
-        disabled={!currentUser}
-      />
+      {/* Input or read-only banner */}
+      {readOnly ? (
+        <div className="border-t border-[#E5E5EA] bg-[#F2F2F7] px-4 py-3 flex items-center gap-3">
+          <Lock className="h-4 w-4 text-[#8E8E93] flex-shrink-0" />
+          <p className="text-[13px] text-[#8E8E93] flex-1">Sign in to join the conversation</p>
+          <button
+            onClick={() => { /* will be handled by parent */ document.dispatchEvent(new CustomEvent("schooly:openauth")); }}
+            className="text-[13px] font-semibold text-[#007AFF]"
+          >
+            Sign In
+          </button>
+        </div>
+      ) : (
+        <MessageInput
+          onSend={handleSend}
+          replyTo={replyTo}
+          onCancelReply={() => setReplyTo(null)}
+          disabled={!currentUser}
+        />
+      )}
     </div>
   );
 }
@@ -848,15 +961,35 @@ export default function Messages() {
   const [showNewModal, setShowNewModal] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [convLoading, setConvLoading] = useState(true);
+  const [guestConv, setGuestConv] = useState<(Conversation & { messages: Message[] }) | null>(null);
   const { toast } = useToast();
+
+  // Listen for sign-in events from the read-only banner
+  useEffect(() => {
+    const h = () => setShowAuthModal(true);
+    document.addEventListener("schooly:openauth", h);
+    return () => document.removeEventListener("schooly:openauth", h);
+  }, []);
 
   // Fetch conversations
   const fetchConversations = useCallback(async () => {
     if (!user) {
-      // Even logged-out users can see the "everyone" conversation
+      // Guest: fetch the public everyone conversation
       try {
         const res = await fetch("/api/conversations/everyone-public");
-        // We'll just fetch the everyone conv ID another way
+        if (res.ok) {
+          const data = await res.json();
+          const conv: Conversation & { messages: Message[] } = {
+            id: data.id,
+            name: data.name || "Everyone",
+            type: "everyone",
+            members: [],
+            messages: data.messages || [],
+            createdAt: new Date().toISOString(),
+          };
+          setGuestConv(conv);
+          setActiveConvId(data.id);
+        }
       } catch {}
       setConvLoading(false);
       return;
@@ -866,7 +999,6 @@ export default function Messages() {
       if (res.ok) {
         const data: Conversation[] = await res.json();
         setConversations(data);
-        // Auto-select "everyone" or first conversation
         if (!activeConvId && data.length > 0) {
           setActiveConvId(data[0].id);
         }
@@ -878,7 +1010,7 @@ export default function Messages() {
     fetchConversations();
   }, [fetchConversations]);
 
-  // SSE for conversation-level events
+  // SSE for logged-in users
   useEffect(() => {
     if (!user) return;
     const es = new EventSource("/api/messages/sse");
@@ -901,51 +1033,43 @@ export default function Messages() {
     return () => es.close();
   }, [user?.id]);
 
-  const activeConv = conversations.find(c => c.id === activeConvId) || null;
+  const activeConv = user
+    ? (conversations.find(c => c.id === activeConvId) || null)
+    : guestConv;
 
   const handleConvCreated = (conv: Conversation) => {
     setConversations(prev => prev.find(c => c.id === conv.id) ? prev : [conv, ...prev]);
     setActiveConvId(conv.id);
   };
 
-  // If not logged in, show centered sign-in prompt
-  if (!user) {
-    return (
-      <div className="h-screen flex flex-col items-center justify-center gap-5 bg-gray-50">
-        <div className="h-24 w-24 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center shadow-lg">
-          <Users className="h-12 w-12 text-white" />
-        </div>
-        <div className="text-center">
-          <h2 className="text-2xl font-bold text-gray-900">School Messages</h2>
-          <p className="text-gray-500 text-sm mt-2 max-w-xs">Sign in to chat with everyone, send direct messages, and create group chats</p>
-        </div>
-        <div className="flex gap-3">
-          <Button onClick={() => setShowAuthModal(true)} className="rounded-full px-8">Sign In</Button>
-          <Button variant="outline" onClick={() => { setShowAuthModal(true); }} className="rounded-full px-8">Create Account</Button>
-        </div>
-        <a href="/" className="text-sm text-blue-500 hover:underline mt-2">← Back to School-y</a>
-        {showAuthModal && <AuthModal open={showAuthModal} onClose={() => setShowAuthModal(false)} initialMode="login" />}
-      </div>
-    );
-  }
-
   return (
     <div className="h-screen flex bg-white overflow-hidden">
       {/* Sidebar */}
-      <div className={`${showSidebar ? "flex" : "hidden"} md:flex flex-col border-r border-gray-100 bg-white flex-shrink-0 w-full md:w-72 xl:w-80`}>
+      <div className={`${showSidebar ? "flex" : "hidden"} md:flex flex-col border-r border-[#E5E5EA] bg-white flex-shrink-0 w-full md:w-72 xl:w-80`}>
         {/* Sidebar header */}
-        <div className="px-4 pt-4 pb-3 border-b border-gray-100">
-          {/* School-y back link */}
-          <a href="/" className="flex items-center gap-1 text-xs text-gray-400 hover:text-blue-500 transition-colors mb-3 w-fit">
+        <div className="px-4 pt-4 pb-3 border-b border-[#E5E5EA]">
+          <a href="/"
+            className="flex items-center gap-1 text-[12px] text-[#007AFF] mb-3 w-fit">
             <ChevronLeft className="h-3.5 w-3.5" />
             <span>School-y</span>
           </a>
           <div className="flex items-center justify-between">
-            <h1 className="text-xl font-bold text-gray-900">Messages</h1>
-            <button onClick={() => setShowNewModal(true)}
-              className="p-2 rounded-full hover:bg-gray-100 text-blue-500 transition-colors">
-              <MessageSquarePlus className="h-5 w-5" />
-            </button>
+            <h1 className="text-[22px] font-bold text-[#1C1C1E]">Messages</h1>
+            {user ? (
+              <button onClick={() => setShowNewModal(true)}
+                className="p-2 rounded-full hover:bg-[#F2F2F7] text-[#007AFF] transition-colors"
+                data-testid="button-new-message">
+                <MessageSquarePlus className="h-5 w-5" />
+              </button>
+            ) : (
+              <button
+                onClick={() => setShowAuthModal(true)}
+                className="text-[13px] font-semibold text-[#007AFF]"
+                data-testid="button-signin-sidebar"
+              >
+                Sign In
+              </button>
+            )}
           </div>
         </div>
 
@@ -953,12 +1077,20 @@ export default function Messages() {
         <div className="flex-1 overflow-y-auto px-2 py-2">
           {convLoading ? (
             <div className="flex flex-col gap-2 p-2">
-              {[1, 2, 3].map(i => <div key={i} className="h-14 bg-gray-100 rounded-xl animate-pulse" />)}
+              {[1, 2, 3].map(i => <div key={i} className="h-14 bg-[#F2F2F7] rounded-[14px] animate-pulse" />)}
             </div>
+          ) : !user && guestConv ? (
+            // Guest view — just the Everyone conversation
+            <ConversationItem
+              conv={{ ...guestConv, lastMessage: guestConv.messages[guestConv.messages.length - 1] || null }}
+              isActive={true}
+              currentUserId={undefined}
+              onClick={() => {}}
+            />
           ) : conversations.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-center px-4 gap-2">
-              <p className="text-gray-400 text-sm">No conversations yet</p>
-              <button onClick={() => setShowNewModal(true)} className="text-blue-500 text-sm font-medium hover:underline">
+              <p className="text-[#8E8E93] text-sm">No conversations yet</p>
+              <button onClick={() => setShowNewModal(true)} className="text-[#007AFF] text-sm font-medium">
                 Start one
               </button>
             </div>
@@ -968,7 +1100,7 @@ export default function Messages() {
                 key={conv.id}
                 conv={conv}
                 isActive={conv.id === activeConvId}
-                currentUserId={user.id}
+                currentUserId={user?.id}
                 onClick={() => { setActiveConvId(conv.id); setShowSidebar(false); }}
               />
             ))
@@ -984,27 +1116,33 @@ export default function Messages() {
             conv={activeConv}
             currentUser={user}
             onBack={() => setShowSidebar(true)}
+            readOnly={!user}
           />
         ) : (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-4">
-            <div className="h-20 w-20 rounded-full bg-gray-100 flex items-center justify-center">
-              <MessageSquarePlus className="h-10 w-10 text-gray-300" />
+            <div className="h-20 w-20 rounded-full bg-[#F2F2F7] flex items-center justify-center">
+              <MessageSquarePlus className="h-10 w-10 text-[#C7C7CC]" />
             </div>
-            <h3 className="text-lg font-semibold text-gray-700">Select a conversation</h3>
-            <p className="text-gray-400 text-sm">Choose from your conversations or start a new one</p>
-            <Button variant="outline" onClick={() => setShowNewModal(true)} className="rounded-full mt-1">
-              <Plus className="h-4 w-4 mr-1" /> New Message
-            </Button>
+            <h3 className="text-[17px] font-semibold text-[#1C1C1E]">Select a conversation</h3>
+            <p className="text-[#8E8E93] text-sm">Choose from your conversations or start a new one</p>
+            {user && (
+              <Button variant="outline" onClick={() => setShowNewModal(true)} className="rounded-full mt-1">
+                <Plus className="h-4 w-4 mr-1" /> New Message
+              </Button>
+            )}
           </div>
         )}
       </div>
 
-      {/* New conversation modal */}
-      {showNewModal && (
+      {/* Modals */}
+      {showNewModal && user && (
         <NewConversationModal
           onClose={() => setShowNewModal(false)}
           onCreated={handleConvCreated}
         />
+      )}
+      {showAuthModal && (
+        <AuthModal open={showAuthModal} onClose={() => setShowAuthModal(false)} initialMode="login" />
       )}
     </div>
   );

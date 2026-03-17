@@ -676,6 +676,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Public "everyone" conversation (no auth required) — read-only for guests
+  app.get("/api/conversations/everyone-public", async (_req, res) => {
+    try {
+      const conv = await storage.getOrCreateEveryoneConversation();
+      const messages = await storage.getConversationMessages(conv.id);
+      res.json({ id: conv.id, name: conv.name, type: conv.type, messages });
+    } catch {
+      res.status(500).json({ error: "Failed to fetch everyone conversation" });
+    }
+  });
+
   // List user's conversations
   app.get("/api/conversations", async (req: any, res) => {
     const user = await getSessionUser(req);
