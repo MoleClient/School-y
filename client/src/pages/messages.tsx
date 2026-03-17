@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
+import { SchoolyLogo } from "@/components/schooly-logo";
 import { AuthModal } from "@/components/auth-modal";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -406,19 +407,16 @@ function MessageInput({
   const [focused, setFocused] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
-  const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const broadcastTyping = useCallback(() => {
-    if (!convId || disabled) return;
-    apiRequest("POST", `/api/conversations/${convId}/typing`, {}).catch(() => {});
-  }, [convId, disabled]);
+  const lastTypingBroadcast = useRef<number>(0);
 
   const handleTextChange = (val: string) => {
     setText(val);
     if (val.trim() && convId && !disabled) {
-      if (typingTimer.current) clearTimeout(typingTimer.current);
-      broadcastTyping();
-      typingTimer.current = setTimeout(() => {}, 2500);
+      const now = Date.now();
+      if (now - lastTypingBroadcast.current > 2000) {
+        lastTypingBroadcast.current = now;
+        apiRequest("POST", `/api/conversations/${convId}/typing`, {}).catch(() => {});
+      }
     }
   };
 
@@ -1055,6 +1053,7 @@ function ConversationThread({ conv, currentUser, onBack, readOnly }: {
 
 export default function Messages() {
   const { user } = useAuth();
+  const [, setLocation] = useLocation();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
@@ -1148,11 +1147,7 @@ export default function Messages() {
       <div className={`${showSidebar ? "flex" : "hidden"} md:flex flex-col border-r border-[#E5E5EA] bg-white flex-shrink-0 w-full md:w-72 xl:w-80`}>
         {/* Sidebar header */}
         <div className="px-4 pt-4 pb-3 border-b border-[#E5E5EA]">
-          <a href="/"
-            className="flex items-center gap-1 text-[12px] text-[#007AFF] mb-3 w-fit">
-            <ChevronLeft className="h-3.5 w-3.5" />
-            <span>School-y</span>
-          </a>
+          <SchoolyLogo size="small" onClick={() => setLocation("/")} className="mb-3 cursor-pointer" />
           <div className="flex items-center justify-between">
             <h1 className="text-[22px] font-bold text-[#1C1C1E]">School-y Text</h1>
             {user ? (
