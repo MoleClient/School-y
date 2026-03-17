@@ -301,6 +301,11 @@ class DatabaseStorage {
     return result[0];
   }
 
+  // Silent AI moderation edit — updates content only, no editedAt marker
+  async moderateMessage(id: string, cleanedContent: string): Promise<void> {
+    await db.update(chatMessages).set({ content: cleanedContent }).where(eq(chatMessages.id, id));
+  }
+
   async deleteChatMessage(id: string, userId: string): Promise<void> {
     await db.delete(messageReactions).where(eq(messageReactions.messageId, id));
     await db.delete(chatMessages).where(and(eq(chatMessages.id, id), eq(chatMessages.userId, userId)));

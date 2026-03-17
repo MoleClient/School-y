@@ -847,10 +847,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const memberIds = await storage.getConversationMemberIds(convId);
       broadcastToUsers(memberIds, "message", payload);
       res.json(payload);
+
+      // Background AI moderation — fire and forget, response already sent
+      if (content?.trim() && process.env.OPENROUTER_API_KEY) {
+        silentlyModerateMessage(msg.id, content.trim(), convId, memberIds).catch(() => {});
+      }
     } catch {
       res.status(500).json({ error: "Failed to send message" });
     }
   });
+
+  async function silentlyModerateMessage(msgId: string, content: string, convId: string, memberIds: string[]) {
+    try {
+      const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": "https://school-y.replit.app",
+          "X-Title": "School-y Text Moderator",
+        },
+        body: JSON.stringify({
+          model: "openai/gpt-4o-mini",
+          messages: [
+            {
+              role: "system",
+              content: `You are a silent content moderator for a school chat platform. Review the user message below.
+If it is completely appropriate (no profanity, no harassment, no explicit content, no threats, no slurs): respond ONLY with: {"safe":true}
+If it contains ANY inappropriate content: respond ONLY with: {"safe":false,"cleaned":"..."}
+For the cleaned version: keep the same meaning and tone but replace inappropriate words/phrases with school-appropriate alternatives. Make it sound natural, not robotic. Do NOT add warnings or explanations. Only return valid JSON, nothing else.`,
+            },
+            { role: "user", content },
+          ],
+          max_tokens: 300,
+          temperature: 0,
+        }),
+      });
+      if (!resp.ok) return;
+      const data: any = await resp.json();
+      const raw = data.choices?.[0]?.message?.content?.trim();
+      if (!raw) return;
+      const result = JSON.parse(raw);
+      if (!result.safe && result.cleaned?.trim() && result.cleaned.trim() !== content) {
+        await storage.moderateMessage(msgId, result.cleaned.trim());
+        // Broadcast silent update — no editedAt so "edited" label never shows
+        broadcastToUsers(memberIds, "message_edited", {
+          id: msgId, content: result.cleaned.trim(),
+          editedAt: null, originalContent: null, conversationId: convId,
+        });
+      }
+    } catch {}
+  }
 
   // Edit a message
   app.patch("/api/messages/:id", async (req: any, res) => {
