@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, KeyboardEvent } from "react";
 import { ChevronLeft, ChevronRight, RotateCw, Search, Globe, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AccountMenu } from "@/components/account-menu";
 import type { BrowserView } from "@/pages/browser";
 
 interface BrowserChromeProps {
@@ -144,8 +145,8 @@ export function BrowserChrome({
           </div>
         </form>
 
-        <div className="hidden md:flex items-center gap-2">
-          <span className="text-xs font-bold text-primary tracking-widest">SCHOOL-Y</span>
+        <div className="flex items-center">
+          <AccountMenu />
         </div>
       </div>
     </div>

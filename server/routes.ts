@@ -425,7 +425,148 @@ function cleanCache() {
 
 const OPENROUTER_MODEL = "openai/gpt-4o";
 
+// Middleware: extract user from session cookie
+async function getSessionUser(req: any): Promise<{ id: string; username: string; createdAt: Date } | null> {
+  const token = req.cookies?.schooly_session;
+  if (!token) return null;
+  try {
+    const session = await storage.getSession(token);
+    if (!session) return null;
+    return { id: session.user.id, username: session.user.username, createdAt: session.user.createdAt };
+  } catch {
+    return null;
+  }
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Parse cookies
+  app.use((req: any, _res: any, next: any) => {
+    req.cookies = {};
+    const cookieHeader = req.headers.cookie || "";
+    cookieHeader.split(";").forEach((pair: string) => {
+      const [k, ...v] = pair.trim().split("=");
+      if (k) req.cookies[k.trim()] = decodeURIComponent(v.join("="));
+    });
+    next();
+  });
+
+  // ── Auth routes ─────────────────────────────────────────────────────────
+  app.post("/api/auth/register", async (req, res) => {
+    try {
+      const { username, password } = req.body;
+      if (!username || !password) return res.status(400).json({ error: "Username and password required" });
+      if (username.length < 3) return res.status(400).json({ error: "Username must be at least 3 characters" });
+      if (username.length > 20) return res.status(400).json({ error: "Username must be 20 characters or less" });
+      if (!/^[a-zA-Z0-9_]+$/.test(username)) return res.status(400).json({ error: "Username can only contain letters, numbers, and underscores" });
+      if (password.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
+
+      const existing = await storage.getUserByUsername(username);
+      if (existing) return res.status(409).json({ error: "Username already taken" });
+
+      const user = await storage.createUser({ username, password });
+      const session = await storage.createSession(user.id);
+
+      res.cookie("schooly_session", session.token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 30 * 24 * 60 * 60 * 1000,
+        path: "/",
+      });
+      res.json({ id: user.id, username: user.username, createdAt: user.createdAt });
+    } catch (err) {
+      console.error("Register error:", err);
+      res.status(500).json({ error: "Registration failed" });
+    }
+  });
+
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const { username, password } = req.body;
+      if (!username || !password) return res.status(400).json({ error: "Username and password required" });
+
+      const user = await storage.getUserByUsername(username);
+      if (!user) return res.status(401).json({ error: "Invalid username or password" });
+
+      const valid = await storage.verifyPassword(password, user.password);
+      if (!valid) return res.status(401).json({ error: "Invalid username or password" });
+
+      const session = await storage.createSession(user.id);
+
+      res.cookie("schooly_session", session.token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 30 * 24 * 60 * 60 * 1000,
+        path: "/",
+      });
+      res.json({ id: user.id, username: user.username, createdAt: user.createdAt });
+    } catch (err) {
+      console.error("Login error:", err);
+      res.status(500).json({ error: "Login failed" });
+    }
+  });
+
+  app.post("/api/auth/logout", async (req: any, res) => {
+    const token = req.cookies?.schooly_session;
+    if (token) await storage.deleteSession(token).catch(() => {});
+    res.clearCookie("schooly_session", { path: "/" });
+    res.json({ ok: true });
+  });
+
+  app.get("/api/auth/me", async (req, res) => {
+    const user = await getSessionUser(req);
+    if (!user) return res.status(401).json({ error: "Not logged in" });
+    res.json(user);
+  });
+
+  // ── User browser history ─────────────────────────────────────────────────
+  app.post("/api/user/history", async (req, res) => {
+    const user = await getSessionUser(req);
+    if (!user) return res.status(401).json({ error: "Not logged in" });
+    try {
+      const { url, title, favicon } = req.body;
+      if (!url || !title) return res.status(400).json({ error: "url and title required" });
+      const item = await storage.addBrowserHistory({ userId: user.id, url, title, favicon: favicon || null });
+      res.json(item);
+    } catch (err) {
+      console.error("User history error:", err);
+      res.status(500).json({ error: "Failed to save" });
+    }
+  });
+
+  app.get("/api/user/history", async (req, res) => {
+    const user = await getSessionUser(req);
+    if (!user) return res.status(401).json({ error: "Not logged in" });
+    try {
+      const items = await storage.getUserHistory(user.id);
+      res.json(items);
+    } catch (err) {
+      res.status(500).json({ error: "Failed to get history" });
+    }
+  });
+
+  app.delete("/api/user/history", async (req, res) => {
+    const user = await getSessionUser(req);
+    if (!user) return res.status(401).json({ error: "Not logged in" });
+    try {
+      await storage.deleteUserHistory(user.id);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to clear history" });
+    }
+  });
+
+  app.delete("/api/user/history/:id", async (req, res) => {
+    const user = await getSessionUser(req);
+    if (!user) return res.status(401).json({ error: "Not logged in" });
+    try {
+      await storage.deleteHistoryItem(req.params.id, user.id);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to delete item" });
+    }
+  });
 
   // AI Overview - server-side using OPENROUTER_API_KEY secret
   app.post("/api/ai/overview", async (req, res) => {

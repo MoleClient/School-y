@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { RefreshCw, AlertTriangle, Archive, Globe, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RemoteBrowser } from "./remote-browser";
+import { useAuth } from "@/contexts/AuthContext";
 
 declare global {
   interface Window {
@@ -97,6 +98,7 @@ function LoadingBar({ progress, visible }: { progress: number; visible: boolean 
 }
 
 export function WebpageViewer({ url, onUrlChange, onNavigate }: WebpageViewerProps) {
+  const { user } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
   const [loadProgress, setLoadProgress] = useState(0);
   const [showError, setShowError] = useState(false);
@@ -108,6 +110,13 @@ export function WebpageViewer({ url, onUrlChange, onNavigate }: WebpageViewerPro
   const progressIntervalRef = useRef<NodeJS.Timeout>();
   const uvReadyRef = useRef(false);
   const uvWispRetryRef = useRef(0); // how many times we've tried to reinit Wisp
+
+  // Keep a ref to the current user so handleLoad (memoized with []) can access it
+  const userRef = useRef(user);
+  useEffect(() => { userRef.current = user; }, [user]);
+
+  // Keep a ref to the current clean URL so handleLoad can access it
+  const cleanUrlRef = useRef("");
 
   // Wait for UV service worker to be ready
   useEffect(() => {
@@ -137,6 +146,7 @@ export function WebpageViewer({ url, onUrlChange, onNavigate }: WebpageViewerPro
   }, []);
 
   const cleanUrl = url.split('?_reload=')[0];
+  cleanUrlRef.current = cleanUrl;
   const useRemoteBrowser = cleanUrl ? REMOTE_BROWSER_SITES.some(s => cleanUrl.includes(s)) : false;
   const proxyUrl = (cleanUrl && !useRemoteBrowser) ? toProxyUrl(cleanUrl, uvReady && !uvFailed) : "";
 
@@ -234,6 +244,35 @@ export function WebpageViewer({ url, onUrlChange, onNavigate }: WebpageViewerPro
     if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
     setLoadProgress(100);
     setTimeout(() => setIsLoading(false), 300);
+
+    // Save to user history if logged in
+    if (userRef.current && cleanUrlRef.current) {
+      try {
+        const doc = iframeRef.current?.contentDocument;
+        const pageTitle = doc?.title || (() => {
+          try { return new URL(cleanUrlRef.current).hostname.replace("www.", ""); } catch { return cleanUrlRef.current; }
+        })();
+        const faviconEl = doc?.querySelector<HTMLLinkElement>('link[rel*="icon"]');
+        const favicon = faviconEl?.href || null;
+        fetch("/api/user/history", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: cleanUrlRef.current, title: pageTitle || cleanUrlRef.current, favicon }),
+        }).catch(() => {});
+      } catch {
+        // cross-origin iframe — use URL as title
+        try {
+          const hostname = new URL(cleanUrlRef.current).hostname.replace("www.", "");
+          fetch("/api/user/history", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: cleanUrlRef.current, title: hostname, favicon: null }),
+          }).catch(() => {});
+        } catch {}
+      }
+    }
   }, []);
 
   const handleError = useCallback(() => {
