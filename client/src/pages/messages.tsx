@@ -1054,7 +1054,7 @@ export default function Messages() {
             <span>School-y</span>
           </a>
           <div className="flex items-center justify-between">
-            <h1 className="text-[22px] font-bold text-[#1C1C1E]">Messages</h1>
+            <h1 className="text-[22px] font-bold text-[#1C1C1E]">School-y Text</h1>
             {user ? (
               <button onClick={() => setShowNewModal(true)}
                 className="p-2 rounded-full hover:bg-[#F2F2F7] text-[#007AFF] transition-colors"

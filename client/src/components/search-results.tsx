@@ -162,8 +162,7 @@ function SearchBar({
               data-testid="button-messages"
             >
               <MessageSquare className="w-3.5 h-3.5" />
-              <span>Messages</span>
-              <span className="px-1 py-px text-[9px] font-bold bg-[#EA4335] text-white rounded-full uppercase tracking-wide leading-none">NEW</span>
+              <span>School-y Text</span>
             </button>
             <AccountMenu />
           </div>
