@@ -3,17 +3,23 @@ import { useAuth } from "@/contexts/AuthContext";
 import { AuthModal } from "@/components/auth-modal";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { useLocation } from "wouter";
+import { Input } from "@/components/ui/input";
 import {
-  Send, Image as ImageIcon, Reply, Pencil, Trash2, X,
-  MessageSquare, AlertTriangle, ChevronDown, Check
+  Send, Image as ImageIcon, Reply, Pencil, Trash2, X, Plus,
+  Users, MessageSquarePlus, SmilePlus, Check, Info, ChevronLeft,
+  Search, UserPlus
 } from "lucide-react";
+import { useLocation } from "wouter";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
-interface MessageUser {
+// ─── Types ──────────────────────────────────────────────────────────────────
+
+interface UserMeta {
   id: string;
   username: string;
-  displayName: string | null;
-  avatarUrl: string | null;
+  displayName?: string | null;
+  avatarUrl?: string | null;
 }
 
 interface MessageReaction {
@@ -25,520 +31,968 @@ interface MessageReaction {
 
 interface Message {
   id: string;
+  conversationId: string;
   userId: string;
   content: string;
-  imageUrl: string | null;
-  replyToId: string | null;
-  editedAt: string | null;
-  originalContent: string | null;
+  imageUrl?: string | null;
+  replyToId?: string | null;
+  editedAt?: string | null;
+  originalContent?: string | null;
+  isSystem?: boolean;
   createdAt: string;
-  user: MessageUser;
+  user: UserMeta;
   reactions: MessageReaction[];
 }
 
-const EMOJI_LIST = ["👍", "❤️", "😂", "😮", "😢", "🔥", "🎉", "💯"];
+interface Conversation {
+  id: string;
+  name?: string | null;
+  type: "everyone" | "dm" | "group";
+  displayName?: string | null;
+  avatarUrl?: string | null;
+  members: UserMeta[];
+  lastMessage?: Message | null;
+  createdAt: string;
+}
 
-function getInitials(user: MessageUser) {
-  const name = user.displayName || user.username;
-  return name.slice(0, 2).toUpperCase();
+const QUICK_EMOJIS = ["❤️", "😂", "😮", "😢", "👍", "👎"];
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function initials(u: UserMeta) {
+  return (u.displayName || u.username || "?").slice(0, 2).toUpperCase();
 }
 
 function formatTime(iso: string) {
   const d = new Date(iso);
   const now = new Date();
-  const diffMs = now.getTime() - d.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  if (diffMins < 1) return "just now";
-  if (diffMins < 60) return `${diffMins}m ago`;
-  const diffHrs = Math.floor(diffMins / 60);
-  if (diffHrs < 24) return `${diffHrs}h ago`;
-  return d.toLocaleDateString();
+  const isToday = d.toDateString() === now.toDateString();
+  const isThisYear = d.getFullYear() === now.getFullYear();
+  if (isToday) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (isThisYear) return d.toLocaleDateString([], { month: "short", day: "numeric" });
+  return d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
 }
 
-function groupReactions(reactions: MessageReaction[]) {
-  const map: Record<string, string[]> = {};
-  for (const r of reactions) {
-    if (!map[r.emoji]) map[r.emoji] = [];
-    map[r.emoji].push(r.userId);
-  }
-  return map;
+function formatDateSeparator(iso: string) {
+  const d = new Date(iso);
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) return "Today";
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return d.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
 }
 
-function ReactionBar({ reactions, messageId, currentUserId, onToggle }: {
-  reactions: MessageReaction[];
-  messageId: string;
-  currentUserId?: string;
-  onToggle: (messageId: string, emoji: string) => void;
-}) {
-  const grouped = groupReactions(reactions);
-  if (Object.keys(grouped).length === 0) return null;
+function shouldShowDateSeparator(msgs: Message[], i: number) {
+  if (i === 0) return true;
+  const prev = new Date(msgs[i - 1].createdAt);
+  const curr = new Date(msgs[i].createdAt);
+  return prev.toDateString() !== curr.toDateString();
+}
+
+// ─── UserAvatar ───────────────────────────────────────────────────────────────
+
+function UserAvatar({ user, size = "sm" }: { user: UserMeta; size?: "sm" | "md" }) {
+  const cls = size === "sm" ? "h-8 w-8 text-xs" : "h-10 w-10 text-sm";
   return (
-    <div className="flex flex-wrap gap-1 mt-1">
-      {Object.entries(grouped).map(([emoji, userIds]) => (
-        <button
-          key={emoji}
-          onClick={() => onToggle(messageId, emoji)}
-          className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs border transition-colors ${
-            currentUserId && userIds.includes(currentUserId)
-              ? "bg-blue-100 border-blue-300 dark:bg-blue-900/40 dark:border-blue-600"
-              : "bg-muted border-border hover:bg-muted/80"
-          }`}
-          title={`${userIds.length} reaction${userIds.length !== 1 ? "s" : ""}`}
-        >
-          <span>{emoji}</span>
-          <span className="text-muted-foreground">{userIds.length}</span>
+    <Avatar className={cls}>
+      {user.avatarUrl && <AvatarImage src={user.avatarUrl} alt={user.username} />}
+      <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold">{initials(user)}</AvatarFallback>
+    </Avatar>
+  );
+}
+
+// ─── EmojiPicker ─────────────────────────────────────────────────────────────
+
+function EmojiPicker({ onSelect, onClose }: { onSelect: (e: string) => void; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose(); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [onClose]);
+  return (
+    <div ref={ref} className="absolute z-50 bg-white border border-gray-200 rounded-2xl shadow-xl p-2 flex gap-1" style={{ bottom: "110%", right: 0 }}>
+      {QUICK_EMOJIS.map(e => (
+        <button key={e} onClick={() => { onSelect(e); onClose(); }}
+          className="text-xl hover:scale-125 transition-transform p-1 rounded-xl hover:bg-gray-100">
+          {e}
         </button>
       ))}
     </div>
   );
 }
 
-function EmojiPicker({ onPick, onClose }: { onPick: (emoji: string) => void; onClose: () => void }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose(); };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [onClose]);
+// ─── MessageBubble ────────────────────────────────────────────────────────────
+
+function MessageBubble({
+  msg, isMine, allMessages, currentUserId, onReply, onEdit, onDelete, onReact,
+}: {
+  msg: Message; isMine: boolean; allMessages: Message[];
+  currentUserId?: string; onReply: (m: Message) => void;
+  onEdit: (m: Message) => void; onDelete: (id: string) => void;
+  onReact: (msgId: string, emoji: string) => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editText, setEditText] = useState(msg.content);
+  const [showOriginal, setShowOriginal] = useState(false);
+  const [showEmoji, setShowEmoji] = useState(false);
+  const editRef = useRef<HTMLTextAreaElement>(null);
+
+  const replyTarget = msg.replyToId ? allMessages.find(m => m.id === msg.replyToId) : null;
+
+  // Group reactions
+  const reactionGroups: Record<string, { count: number; mine: boolean }> = {};
+  for (const r of msg.reactions) {
+    if (!reactionGroups[r.emoji]) reactionGroups[r.emoji] = { count: 0, mine: false };
+    reactionGroups[r.emoji].count++;
+    if (r.userId === currentUserId) reactionGroups[r.emoji].mine = true;
+  }
+
+  if (msg.isSystem) {
+    return (
+      <div className="flex justify-center my-3">
+        <span className="text-xs text-gray-400 bg-gray-100 px-3 py-1 rounded-full">{msg.content}</span>
+      </div>
+    );
+  }
+
+  const handleEditSubmit = () => {
+    if (editText.trim() && editText !== msg.content) {
+      onEdit({ ...msg, content: editText.trim() });
+    }
+    setEditing(false);
+  };
+
   return (
-    <div ref={ref} className="absolute bottom-8 right-0 z-50 bg-background border border-border rounded-xl shadow-lg p-2 flex gap-1.5 flex-wrap w-48">
-      {EMOJI_LIST.map(e => (
-        <button key={e} onClick={() => { onPick(e); onClose(); }} className="text-lg hover:scale-110 transition-transform p-1 rounded">{e}</button>
-      ))}
+    <div className={`flex gap-2 items-end group mb-1 ${isMine ? "flex-row-reverse" : "flex-row"}`}
+      onMouseEnter={() => setHovered(true)} onMouseLeave={() => { setHovered(false); setShowEmoji(false); }}>
+
+      {/* Avatar (others only) */}
+      {!isMine && (
+        <div className="w-8 flex-shrink-0 mb-1">
+          <UserAvatar user={msg.user} size="sm" />
+        </div>
+      )}
+
+      <div className={`flex flex-col max-w-[70%] ${isMine ? "items-end" : "items-start"}`}>
+        {/* Username (others only) */}
+        {!isMine && (
+          <span className="text-xs text-gray-500 mb-1 ml-1">{msg.user.displayName || msg.user.username}</span>
+        )}
+
+        {/* Reply context */}
+        {replyTarget && (
+          <div className={`text-xs px-3 py-1.5 mb-1 rounded-2xl border max-w-full ${
+            isMine ? "bg-blue-50 border-blue-200 text-blue-700" : "bg-gray-100 border-gray-200 text-gray-600"
+          } truncate`}>
+            <span className="font-semibold">{replyTarget.user.displayName || replyTarget.user.username}</span>: {replyTarget.content}
+          </div>
+        )}
+
+        {/* Bubble */}
+        <div className="relative">
+          {editing ? (
+            <div className="flex flex-col gap-1">
+              <textarea
+                ref={editRef} value={editText} onChange={e => setEditText(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleEditSubmit(); } if (e.key === "Escape") setEditing(false); }}
+                className="rounded-2xl px-3.5 py-2.5 text-sm bg-white border-2 border-blue-400 outline-none resize-none min-w-[200px]"
+                rows={2} autoFocus
+              />
+              <div className="flex gap-1 justify-end">
+                <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
+                <Button size="sm" onClick={handleEditSubmit}>Save</Button>
+              </div>
+            </div>
+          ) : (
+            <div
+              className={`rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed cursor-default ${
+                isMine
+                  ? "bg-blue-500 text-white rounded-br-sm"
+                  : "bg-gray-100 text-gray-900 rounded-bl-sm"
+              }`}
+            >
+              {msg.imageUrl && (
+                <img src={msg.imageUrl} alt="attachment" className="rounded-xl mb-2 max-w-[250px] max-h-[200px] object-cover cursor-pointer"
+                  onClick={() => window.open(msg.imageUrl!, "_blank")} />
+              )}
+              <span>{msg.content}</span>
+              {msg.editedAt && (
+                <button onClick={() => setShowOriginal(v => !v)}
+                  className={`text-xs ml-2 opacity-60 underline underline-offset-2 ${isMine ? "text-blue-100" : "text-gray-500"}`}>
+                  edited
+                </button>
+              )}
+              {showOriginal && msg.originalContent && (
+                <div className={`text-xs mt-1 pt-1 border-t opacity-70 ${isMine ? "border-blue-300" : "border-gray-300"}`}>
+                  Original: {msg.originalContent}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Action bar */}
+          <div className={`absolute ${isMine ? "left-0 -translate-x-full pr-1" : "right-0 translate-x-full pl-1"} top-1/2 -translate-y-1/2 flex items-center gap-0.5 transition-opacity ${hovered && !editing ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
+            <div className="relative">
+              <button onClick={() => setShowEmoji(v => !v)}
+                className="p-1.5 rounded-full hover:bg-gray-200 text-gray-500 transition-colors">
+                <SmilePlus className="h-3.5 w-3.5" />
+              </button>
+              {showEmoji && <EmojiPicker onSelect={emoji => onReact(msg.id, emoji)} onClose={() => setShowEmoji(false)} />}
+            </div>
+            <button onClick={() => onReply(msg)}
+              className="p-1.5 rounded-full hover:bg-gray-200 text-gray-500 transition-colors">
+              <Reply className="h-3.5 w-3.5" />
+            </button>
+            {isMine && (
+              <>
+                <button onClick={() => { setEditing(true); setEditText(msg.content); }}
+                  className="p-1.5 rounded-full hover:bg-gray-200 text-gray-500 transition-colors">
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+                <button onClick={() => onDelete(msg.id)}
+                  className="p-1.5 rounded-full hover:bg-red-100 text-gray-500 hover:text-red-500 transition-colors">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Reactions */}
+        {Object.keys(reactionGroups).length > 0 && (
+          <div className={`flex flex-wrap gap-1 mt-1 ${isMine ? "justify-end" : "justify-start"}`}>
+            {Object.entries(reactionGroups).map(([emoji, { count, mine }]) => (
+              <button key={emoji} onClick={() => onReact(msg.id, emoji)}
+                className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-colors ${
+                  mine ? "bg-blue-100 border-blue-300 text-blue-700" : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+                }`}>
+                {emoji} {count > 1 && <span>{count}</span>}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Timestamp */}
+        <span className={`text-[10px] text-gray-400 mt-0.5 ${isMine ? "mr-1" : "ml-1"}`}>
+          {formatTime(msg.createdAt)}
+        </span>
+      </div>
+
+      {/* Spacer for own messages */}
+      {isMine && <div className="w-8 flex-shrink-0" />}
     </div>
   );
 }
 
-function MessageBubble({
-  msg,
-  messages,
-  currentUserId,
-  onReply,
-  onEdit,
-  onDelete,
-  onReact,
-}: {
-  msg: Message;
-  messages: Message[];
-  currentUserId?: string;
-  onReply: (msg: Message) => void;
-  onEdit: (msg: Message) => void;
-  onDelete: (id: string) => void;
-  onReact: (messageId: string, emoji: string) => void;
-}) {
-  const isOwn = currentUserId === msg.userId;
-  const [showEmoji, setShowEmoji] = useState(false);
-  const [showOriginal, setShowOriginal] = useState(false);
-  const replyTarget = msg.replyToId ? messages.find(m => m.id === msg.replyToId) : null;
+// ─── ConversationItem ─────────────────────────────────────────────────────────
 
-  return (
-    <div className={`group flex gap-2.5 ${isOwn ? "flex-row-reverse" : "flex-row"}`} data-testid={`message-${msg.id}`}>
-      <Avatar className="w-8 h-8 flex-shrink-0 mt-1">
-        <AvatarImage src={msg.user.avatarUrl || undefined} />
-        <AvatarFallback className="text-xs bg-gradient-to-br from-blue-500 to-purple-600 text-white">
-          {getInitials(msg.user)}
+function ConversationItem({ conv, isActive, onClick, currentUserId }: {
+  conv: Conversation; isActive: boolean; onClick: () => void; currentUserId?: string;
+}) {
+  const lastMsg = conv.lastMessage;
+  const previewText = lastMsg
+    ? lastMsg.isSystem ? lastMsg.content
+    : lastMsg.imageUrl && !lastMsg.content ? "Image"
+    : lastMsg.content
+    : "No messages yet";
+
+  const ConvAvatar = () => {
+    if (conv.type === "everyone") {
+      return (
+        <div className="h-10 w-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center flex-shrink-0">
+          <Users className="h-5 w-5 text-white" />
+        </div>
+      );
+    }
+    if (conv.type === "group") {
+      return (
+        <div className="h-10 w-10 rounded-full bg-gradient-to-br from-green-400 to-blue-500 flex items-center justify-center flex-shrink-0">
+          <span className="text-white font-bold text-sm">{(conv.displayName || conv.name || "G").slice(0, 2).toUpperCase()}</span>
+        </div>
+      );
+    }
+    const other = conv.members?.find(m => m.id !== currentUserId);
+    return (
+      <Avatar className="h-10 w-10 flex-shrink-0">
+        {other?.avatarUrl && <AvatarImage src={other.avatarUrl} />}
+        <AvatarFallback className="bg-gray-200 text-gray-600 font-semibold">
+          {initials(other || { id: "", username: "?" })}
         </AvatarFallback>
       </Avatar>
+    );
+  };
 
-      <div className={`flex flex-col max-w-[75%] ${isOwn ? "items-end" : "items-start"}`}>
-        <div className={`flex items-center gap-2 mb-0.5 ${isOwn ? "flex-row-reverse" : "flex-row"}`}>
-          <span className="text-xs font-semibold text-foreground">
-            {msg.user.displayName || msg.user.username}
+  return (
+    <button onClick={onClick} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-left transition-colors ${
+      isActive ? "bg-blue-50 border border-blue-100" : "hover:bg-gray-50"
+    }`}>
+      <ConvAvatar />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between gap-1">
+          <span className="font-semibold text-sm text-gray-900 truncate">
+            {conv.displayName || conv.name || "Conversation"}
           </span>
-          <span className="text-[11px] text-muted-foreground">{formatTime(msg.createdAt)}</span>
-          {msg.editedAt && (
-            <span className="text-[10px] text-muted-foreground italic">(edited)</span>
+          {lastMsg && (
+            <span className="text-[10px] text-gray-400 flex-shrink-0">{formatTime(lastMsg.createdAt)}</span>
           )}
         </div>
+        <p className="text-xs text-gray-500 truncate">{previewText}</p>
+      </div>
+    </button>
+  );
+}
 
-        {replyTarget && (
-          <div className={`text-xs text-muted-foreground border-l-2 border-primary/40 pl-2 mb-1 max-w-full truncate ${isOwn ? "text-right border-r-2 border-l-0 pr-2 pl-0" : ""}`}>
-            <span className="font-medium">{replyTarget.user.displayName || replyTarget.user.username}: </span>
-            {replyTarget.content.slice(0, 60)}{replyTarget.content.length > 60 ? "…" : ""}
-          </div>
-        )}
+// ─── UserSearchInput ──────────────────────────────────────────────────────────
 
-        <div className="relative">
-          <div
-            className={`rounded-2xl px-3 py-2 text-sm cursor-pointer select-text ${
-              isOwn
-                ? "bg-[#4285F4] text-white rounded-br-sm"
-                : "bg-muted text-foreground rounded-bl-sm"
-            }`}
-            onClick={() => msg.editedAt && setShowOriginal(v => !v)}
-            title={msg.editedAt ? "Click to see original" : undefined}
-          >
-            {showOriginal && msg.originalContent ? (
-              <div>
-                <div className="text-xs opacity-70 mb-1 flex items-center gap-1">
-                  <span>Original:</span>
-                  <button onClick={(e) => { e.stopPropagation(); setShowOriginal(false); }} className="opacity-70 hover:opacity-100"><X className="w-3 h-3" /></button>
-                </div>
-                <span className="line-through opacity-60">{msg.originalContent}</span>
-                <div className="text-xs opacity-70 mt-1">Edited:</div>
-                <span>{msg.content}</span>
+function UserSearchInput({ onSelect, excluded = [], label = "Search users..." }: {
+  onSelect: (user: UserMeta) => void;
+  excluded?: string[];
+  label?: string;
+}) {
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState<UserMeta[]>([]);
+  const [loading, setLoading] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => {
+    clearTimeout(timerRef.current);
+    if (!q.trim()) { setResults([]); return; }
+    setLoading(true);
+    timerRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/users/search?q=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        setResults((data as UserMeta[]).filter(u => !excluded.includes(u.id)));
+      } catch {} finally { setLoading(false); }
+    }, 250);
+  }, [q, excluded.join(",")]);
+
+  return (
+    <div className="relative">
+      <div className="flex items-center gap-2 px-3 py-2 bg-gray-100 rounded-xl">
+        <Search className="h-4 w-4 text-gray-400" />
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder={label}
+          className="flex-1 bg-transparent text-sm outline-none placeholder-gray-400" />
+      </div>
+      {results.length > 0 && (
+        <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-50 overflow-hidden">
+          {results.map(u => (
+            <button key={u.id} onClick={() => { onSelect(u); setQ(""); setResults([]); }}
+              className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 transition-colors">
+              <UserAvatar user={u} size="sm" />
+              <div className="text-left">
+                <div className="text-sm font-semibold text-gray-900">{u.displayName || u.username}</div>
+                {u.displayName && <div className="text-xs text-gray-500">@{u.username}</div>}
               </div>
-            ) : (
-              <span className="whitespace-pre-wrap break-words">{msg.content}</span>
-            )}
-            {msg.imageUrl && (
-              <img
-                src={msg.imageUrl}
-                alt="attached"
-                className="mt-2 rounded-lg max-w-[200px] max-h-[200px] object-cover cursor-pointer"
-                onClick={(e) => { e.stopPropagation(); window.open(msg.imageUrl!, "_blank"); }}
-              />
-            )}
-          </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
-          {/* Action bar on hover */}
-          <div className={`absolute top-1 ${isOwn ? "right-full mr-1" : "left-full ml-1"} hidden group-hover:flex items-center gap-0.5 bg-background border border-border rounded-lg shadow px-1 py-0.5`}>
-            <button
-              title="Reply"
-              onClick={() => onReply(msg)}
-              className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-            ><Reply className="w-3.5 h-3.5" /></button>
-            <button
-              title="React"
-              onClick={() => setShowEmoji(v => !v)}
-              className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors text-base leading-none"
-            >+</button>
-            {isOwn && (
-              <>
-                <button
-                  title="Edit"
-                  onClick={() => onEdit(msg)}
-                  className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                ><Pencil className="w-3.5 h-3.5" /></button>
-                <button
-                  title="Delete"
-                  onClick={() => onDelete(msg.id)}
-                  className="p-1 rounded hover:bg-muted text-red-500 hover:text-red-600 transition-colors"
-                ><Trash2 className="w-3.5 h-3.5" /></button>
-              </>
-            )}
-            {showEmoji && (
-              <EmojiPicker onPick={(e) => onReact(msg.id, e)} onClose={() => setShowEmoji(false)} />
-            )}
-          </div>
+// ─── NewConversationModal ─────────────────────────────────────────────────────
+
+function NewConversationModal({ onClose, onCreated }: {
+  onClose: () => void;
+  onCreated: (conv: Conversation) => void;
+}) {
+  const [tab, setTab] = useState<"dm" | "group">("dm");
+  const [selectedUser, setSelectedUser] = useState<UserMeta | null>(null);
+  const [groupName, setGroupName] = useState("");
+  const [groupMembers, setGroupMembers] = useState<UserMeta[]>([]);
+  const [loading, setLoading] = useState(false);
+  const { toast } = useToast();
+
+  const createDm = async () => {
+    if (!selectedUser) return;
+    setLoading(true);
+    try {
+      const res = await apiRequest("POST", "/api/conversations/dm", { targetUserId: selectedUser.id });
+      const conv = await res.json();
+      onCreated(conv);
+      onClose();
+    } catch { toast({ title: "Failed to start conversation", variant: "destructive" }); }
+    setLoading(false);
+  };
+
+  const createGroup = async () => {
+    if (!groupName.trim() || groupMembers.length === 0) return;
+    setLoading(true);
+    try {
+      const res = await apiRequest("POST", "/api/conversations/group", {
+        name: groupName.trim(), memberIds: groupMembers.map(m => m.id),
+      });
+      const conv = await res.json();
+      onCreated(conv);
+      onClose();
+    } catch { toast({ title: "Failed to create group", variant: "destructive" }); }
+    setLoading(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-[400px] max-h-[600px] flex flex-col" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-gray-100">
+          <h2 className="text-lg font-bold text-gray-900">New Message</h2>
+          <button onClick={onClose} className="p-1.5 rounded-full hover:bg-gray-100 text-gray-500"><X className="h-5 w-5" /></button>
         </div>
 
-        <ReactionBar
-          reactions={msg.reactions}
-          messageId={msg.id}
-          currentUserId={currentUserId}
-          onToggle={onReact}
-        />
+        {/* Tabs */}
+        <div className="flex mx-5 mt-4 bg-gray-100 rounded-xl p-1 gap-1">
+          <button onClick={() => setTab("dm")} className={`flex-1 text-sm font-medium py-1.5 rounded-lg transition-colors ${tab === "dm" ? "bg-white shadow text-gray-900" : "text-gray-500"}`}>
+            Direct Message
+          </button>
+          <button onClick={() => setTab("group")} className={`flex-1 text-sm font-medium py-1.5 rounded-lg transition-colors ${tab === "group" ? "bg-white shadow text-gray-900" : "text-gray-500"}`}>
+            Group Chat
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 pt-4 pb-5 flex flex-col gap-4">
+          {tab === "dm" ? (
+            <>
+              <UserSearchInput onSelect={setSelectedUser} label="Search by username..." />
+              {selectedUser && (
+                <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-xl border border-blue-100">
+                  <UserAvatar user={selectedUser} size="md" />
+                  <div>
+                    <div className="font-semibold text-gray-900">{selectedUser.displayName || selectedUser.username}</div>
+                    {selectedUser.displayName && <div className="text-xs text-gray-500">@{selectedUser.username}</div>}
+                  </div>
+                  <button onClick={() => setSelectedUser(null)} className="ml-auto p-1 rounded-full hover:bg-blue-100 text-blue-500"><X className="h-4 w-4" /></button>
+                </div>
+              )}
+              <Button onClick={createDm} disabled={!selectedUser || loading} className="w-full rounded-xl">
+                {loading ? "Starting..." : "Start Conversation"}
+              </Button>
+            </>
+          ) : (
+            <>
+              <input value={groupName} onChange={e => setGroupName(e.target.value)}
+                placeholder="Group chat name..." className="w-full px-4 py-2.5 bg-gray-100 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-300" />
+              <UserSearchInput onSelect={u => setGroupMembers(prev => prev.find(m => m.id === u.id) ? prev : [...prev, u])}
+                excluded={groupMembers.map(m => m.id)} label="Add members..." />
+              {groupMembers.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {groupMembers.map(m => (
+                    <div key={m.id} className="flex items-center gap-1.5 bg-blue-100 text-blue-700 rounded-full px-2.5 py-1 text-xs font-medium">
+                      {m.displayName || m.username}
+                      <button onClick={() => setGroupMembers(prev => prev.filter(x => x.id !== m.id))}><X className="h-3 w-3" /></button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <Button onClick={createGroup} disabled={!groupName.trim() || groupMembers.length === 0 || loading} className="w-full rounded-xl">
+                {loading ? "Creating..." : `Create Group${groupMembers.length > 0 ? ` (${groupMembers.length + 1})` : ""}`}
+              </Button>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-export default function MessagesPage() {
-  const { user } = useAuth();
-  const [, setLocation] = useLocation();
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [input, setInput] = useState("");
-  const [replyTo, setReplyTo] = useState<Message | null>(null);
-  const [editingMsg, setEditingMsg] = useState<Message | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
-  const [showAuthModal, setShowAuthModal] = useState(false);
-  const [showScrollBtn, setShowScrollBtn] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+// ─── MessageInput ─────────────────────────────────────────────────────────────
 
-  const scrollToBottom = useCallback((smooth = true) => {
-    messagesEndRef.current?.scrollIntoView({ behavior: smooth ? "smooth" : "instant" });
-  }, []);
+function MessageInput({ onSend, replyTo, onCancelReply, disabled }: {
+  onSend: (content: string, imageUrl?: string, replyToId?: string) => void;
+  replyTo: Message | null;
+  onCancelReply: () => void;
+  disabled?: boolean;
+}) {
+  const [text, setText] = useState("");
+  const [imageUrl, setImageUrl] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const textRef = useRef<HTMLTextAreaElement>(null);
+  const { toast } = useToast();
 
-  // Fetch initial messages
-  useEffect(() => {
-    fetch("/api/messages")
-      .then(r => r.json())
-      .then(data => { setMessages(data); setLoading(false); setTimeout(() => scrollToBottom(false), 50); })
-      .catch(() => setLoading(false));
-  }, []);
-
-  // SSE for live updates
-  useEffect(() => {
-    const es = new EventSource("/api/messages/sse");
-    es.addEventListener("message", (e) => {
-      const msg: Message = JSON.parse(e.data);
-      setMessages(prev => {
-        if (prev.find(m => m.id === msg.id)) return prev;
-        return [...prev, msg];
-      });
-      setTimeout(() => scrollToBottom(true), 50);
-    });
-    es.addEventListener("message_edited", (e) => {
-      const updated: Message = JSON.parse(e.data);
-      setMessages(prev => prev.map(m => m.id === updated.id ? { ...m, ...updated } : m));
-    });
-    es.addEventListener("message_deleted", (e) => {
-      const { id } = JSON.parse(e.data);
-      setMessages(prev => prev.filter(m => m.id !== id));
-    });
-    es.addEventListener("reactions_updated", (e) => {
-      const { messageId, reactions } = JSON.parse(e.data);
-      setMessages(prev => prev.map(m => m.id === messageId ? { ...m, reactions } : m));
-    });
-    return () => es.close();
-  }, []);
-
-  // Scroll observer
-  useEffect(() => {
-    const el = messagesContainerRef.current;
-    if (!el) return;
-    const handler = () => {
-      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-      setShowScrollBtn(distFromBottom > 200);
-    };
-    el.addEventListener("scroll", handler);
-    return () => el.removeEventListener("scroll", handler);
-  }, []);
-
-  const handleSend = async () => {
-    if (!user) { setShowAuthModal(true); return; }
-    const content = input.trim();
-    if (!content && !imagePreview) return;
-    setSending(true);
-    try {
-      let imageUrl: string | null = null;
-      if (imagePreview) {
-        const res = await fetch("/api/upload", {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ dataUrl: imagePreview }),
-        });
-        if (res.ok) { const d = await res.json(); imageUrl = d.url; }
-      }
-
-      if (editingMsg) {
-        await fetch(`/api/messages/${editingMsg.id}`, {
-          method: "PATCH",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content }),
-        });
-        setEditingMsg(null);
-      } else {
-        await fetch("/api/messages", {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content, imageUrl, replyToId: replyTo?.id || null }),
-        });
-        setReplyTo(null);
-      }
-      setInput("");
-      setImagePreview(null);
-    } finally {
-      setSending(false);
-    }
+  const handleSend = () => {
+    if (!text.trim() && !imageUrl) return;
+    onSend(text.trim(), imageUrl || undefined, replyTo?.id);
+    setText("");
+    setImageUrl("");
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Delete this message?")) return;
-    await fetch(`/api/messages/${id}`, { method: "DELETE", credentials: "include" });
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
   };
 
-  const handleReact = async (messageId: string, emoji: string) => {
-    if (!user) { setShowAuthModal(true); return; }
-    await fetch(`/api/messages/${messageId}/reactions`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ emoji }),
-    });
-  };
-
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => setImagePreview(reader.result as string);
+    reader.onload = async () => {
+      setUploading(true);
+      try {
+        const res = await apiRequest("POST", "/api/upload", { dataUrl: reader.result, filename: file.name });
+        const data = await res.json();
+        setImageUrl(data.url);
+      } catch { toast({ title: "Upload failed", variant: "destructive" }); }
+      setUploading(false);
+    };
     reader.readAsDataURL(file);
     e.target.value = "";
   };
 
-  const handleEdit = (msg: Message) => {
-    setEditingMsg(msg);
-    setInput(msg.content);
-    setReplyTo(null);
-    inputRef.current?.focus();
+  return (
+    <div className="px-4 pb-4 pt-2">
+      {/* Reply preview */}
+      {replyTo && (
+        <div className="flex items-center gap-2 mb-2 px-3 py-2 bg-blue-50 rounded-xl border border-blue-100">
+          <div className="w-1 h-full bg-blue-400 rounded-full flex-shrink-0" />
+          <Reply className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <span className="text-xs font-semibold text-blue-600">{replyTo.user.displayName || replyTo.user.username}</span>
+            <p className="text-xs text-gray-600 truncate">{replyTo.content}</p>
+          </div>
+          <button onClick={onCancelReply} className="p-1 rounded-full hover:bg-blue-100 text-blue-400"><X className="h-3.5 w-3.5" /></button>
+        </div>
+      )}
+
+      {/* Image preview */}
+      {imageUrl && (
+        <div className="relative inline-block mb-2">
+          <img src={imageUrl} alt="attachment" className="h-20 w-20 object-cover rounded-xl border border-gray-200" />
+          <button onClick={() => setImageUrl("")}
+            className="absolute -top-1.5 -right-1.5 bg-gray-700 text-white rounded-full p-0.5"><X className="h-3 w-3" /></button>
+        </div>
+      )}
+
+      <div className="flex items-end gap-2">
+        {/* Image button */}
+        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+        <button onClick={() => fileRef.current?.click()} disabled={uploading || disabled}
+          className="p-2.5 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500 transition-colors flex-shrink-0 mb-0.5">
+          <ImageIcon className="h-5 w-5" />
+        </button>
+
+        {/* Text input */}
+        <div className="flex-1 bg-gray-100 rounded-2xl px-4 py-2.5 flex items-end gap-2">
+          <textarea ref={textRef} value={text} onChange={e => setText(e.target.value)} onKeyDown={handleKeyDown}
+            placeholder={disabled ? "Sign in to send messages..." : "iMessage"}
+            disabled={disabled}
+            rows={1}
+            style={{ resize: "none", maxHeight: "120px", overflow: "auto" }}
+            className="flex-1 bg-transparent text-sm outline-none placeholder-gray-400 min-w-0 disabled:cursor-not-allowed"
+            onInput={e => {
+              const t = e.target as HTMLTextAreaElement;
+              t.style.height = "auto";
+              t.style.height = Math.min(t.scrollHeight, 120) + "px";
+            }}
+          />
+        </div>
+
+        {/* Send button */}
+        <button onClick={handleSend} disabled={(!text.trim() && !imageUrl) || disabled}
+          className={`p-2.5 rounded-full flex-shrink-0 mb-0.5 transition-all ${
+            (text.trim() || imageUrl) && !disabled
+              ? "bg-blue-500 hover:bg-blue-600 text-white shadow-md"
+              : "bg-gray-100 text-gray-300 cursor-not-allowed"
+          }`}>
+          <Send className="h-5 w-5" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── ConversationThread ───────────────────────────────────────────────────────
+
+function ConversationThread({ conv, currentUser, onBack }: {
+  conv: Conversation;
+  currentUser: { id: string; username: string; displayName?: string | null; avatarUrl?: string | null } | null;
+  onBack: () => void;
+}) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [replyTo, setReplyTo] = useState<Message | null>(null);
+  const [showInfo, setShowInfo] = useState(false);
+  const [addingMember, setAddingMember] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const { toast } = useToast();
+
+  // Fetch messages
+  const fetchMessages = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/conversations/${conv.id}/messages`);
+      if (res.ok) setMessages(await res.json());
+    } catch {} finally { setLoading(false); }
+  }, [conv.id]);
+
+  useEffect(() => {
+    setMessages([]);
+    setLoading(true);
+    fetchMessages();
+  }, [conv.id]);
+
+  // SSE for live updates
+  useEffect(() => {
+    const es = new EventSource("/api/messages/sse");
+    es.addEventListener("message", e => {
+      const msg = JSON.parse(e.data) as Message;
+      if (msg.conversationId === conv.id) {
+        setMessages(prev => {
+          if (prev.find(m => m.id === msg.id)) return prev;
+          return [...prev, msg];
+        });
+      }
+    });
+    es.addEventListener("message_edited", e => {
+      const msg = JSON.parse(e.data) as Message;
+      if (msg.conversationId === conv.id) {
+        setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, ...msg } : m));
+      }
+    });
+    es.addEventListener("message_deleted", e => {
+      const { id, conversationId } = JSON.parse(e.data);
+      if (conversationId === conv.id) setMessages(prev => prev.filter(m => m.id !== id));
+    });
+    es.addEventListener("reactions_updated", e => {
+      const { messageId, reactions, conversationId } = JSON.parse(e.data);
+      if (conversationId === conv.id) {
+        setMessages(prev => prev.map(m => m.id === messageId ? { ...m, reactions } : m));
+      }
+    });
+    return () => es.close();
+  }, [conv.id]);
+
+  // Scroll to bottom
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages.length]);
+
+  const handleSend = async (content: string, imageUrl?: string, replyToId?: string) => {
+    if (!currentUser) return;
+    try {
+      await apiRequest("POST", `/api/conversations/${conv.id}/messages`, { content, imageUrl, replyToId });
+      setReplyTo(null);
+    } catch { toast({ title: "Failed to send", variant: "destructive" }); }
   };
 
-  const cancelEdit = () => { setEditingMsg(null); setInput(""); };
-  const cancelReply = () => setReplyTo(null);
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+  const handleEdit = async (msg: Message) => {
+    try {
+      await apiRequest("PATCH", `/api/messages/${msg.id}`, { content: msg.content });
+    } catch { toast({ title: "Failed to edit", variant: "destructive" }); }
   };
+
+  const handleDelete = async (id: string) => {
+    try {
+      await apiRequest("DELETE", `/api/messages/${id}`);
+    } catch { toast({ title: "Failed to delete", variant: "destructive" }); }
+  };
+
+  const handleReact = async (msgId: string, emoji: string) => {
+    if (!currentUser) return;
+    try {
+      const res = await apiRequest("POST", `/api/messages/${msgId}/reactions`, { emoji });
+      const { reactions } = await res.json();
+      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, reactions } : m));
+    } catch {}
+  };
+
+  const handleAddMember = async (user: UserMeta) => {
+    try {
+      await apiRequest("POST", `/api/conversations/${conv.id}/members`, { userId: user.id });
+      setAddingMember(false);
+      toast({ title: `Added ${user.displayName || user.username}` });
+    } catch { toast({ title: "Failed to add member", variant: "destructive" }); }
+  };
+
+  // Conversation header display
+  const isEveryoneConv = conv.type === "everyone";
+  const isDm = conv.type === "dm";
+  const other = isDm ? conv.members?.find(m => m.id !== currentUser?.id) : null;
+  const headerTitle = conv.displayName || conv.name || "Conversation";
+  const memberCount = conv.members?.length || 0;
 
   return (
-    <div className="h-full flex flex-col bg-background overflow-hidden">
+    <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex-shrink-0 border-b border-border bg-background/95 backdrop-blur px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <button onClick={() => setLocation("/")} className="text-muted-foreground hover:text-foreground transition-colors">
-            <X className="w-5 h-5" />
-          </button>
-          <div className="flex items-center gap-2">
-            <MessageSquare className="w-5 h-5 text-[#4285F4]" />
-            <h1 className="font-semibold text-foreground text-base">School Messages</h1>
-            <span className="px-1.5 py-0.5 text-[10px] font-bold bg-[#EA4335] text-white rounded-full uppercase tracking-wide">Beta</span>
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 bg-white">
+        <button onClick={onBack} className="p-1.5 rounded-full hover:bg-gray-100 text-gray-500 md:hidden">
+          <ChevronLeft className="h-5 w-5" />
+        </button>
+
+        {/* Avatar area */}
+        {isEveryoneConv ? (
+          <div className="h-10 w-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center flex-shrink-0">
+            <Users className="h-5 w-5 text-white" />
           </div>
-        </div>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-          <span>Live</span>
-        </div>
-      </div>
-
-      {/* Beta warning */}
-      <div className="flex-shrink-0 bg-amber-50 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-800 px-4 py-2 flex items-center gap-2">
-        <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 flex-shrink-0" />
-        <p className="text-xs text-amber-700 dark:text-amber-300">
-          <strong>Beta:</strong> School Messages is experimental. Keep it respectful — messages are visible to everyone.
-        </p>
-      </div>
-
-      {/* Messages */}
-      <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4 relative">
-        {loading && (
-          <div className="flex items-center justify-center h-full">
-            <div className="w-5 h-5 border-2 border-[#4285F4] border-t-transparent rounded-full animate-spin" />
+        ) : isDm && other ? (
+          <Avatar className="h-10 w-10">
+            {other.avatarUrl && <AvatarImage src={other.avatarUrl} />}
+            <AvatarFallback className="bg-gray-200 font-semibold">{initials(other)}</AvatarFallback>
+          </Avatar>
+        ) : (
+          <div className="h-10 w-10 rounded-full bg-gradient-to-br from-green-400 to-blue-500 flex items-center justify-center flex-shrink-0">
+            <span className="text-white font-bold text-sm">{headerTitle.slice(0, 2).toUpperCase()}</span>
           </div>
         )}
-        {!loading && messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
-            <MessageSquare className="w-12 h-12 opacity-20" />
-            <p className="text-sm">No messages yet. Be the first to say something!</p>
-          </div>
-        )}
-        {messages.map(msg => (
-          <MessageBubble
-            key={msg.id}
-            msg={msg}
-            messages={messages}
-            currentUserId={user?.id}
-            onReply={setReplyTo}
-            onEdit={handleEdit}
-            onDelete={handleDelete}
-            onReact={handleReact}
-          />
-        ))}
-        <div ref={messagesEndRef} />
 
-        {showScrollBtn && (
-          <button
-            onClick={() => scrollToBottom(true)}
-            className="fixed bottom-24 right-6 bg-[#4285F4] text-white rounded-full p-2 shadow-lg z-20 hover:bg-blue-600 transition-colors"
-          >
-            <ChevronDown className="w-4 h-4" />
+        <div className="flex-1 min-w-0">
+          <h2 className="font-semibold text-gray-900 text-sm truncate">{headerTitle}</h2>
+          <p className="text-xs text-gray-500">
+            {isEveryoneConv ? `${memberCount} members` : isDm ? (other?.displayName ? `@${other.username}` : "Direct Message") : `${memberCount} members`}
+          </p>
+        </div>
+
+        {/* Info button for groups */}
+        {!isDm && (
+          <button onClick={() => setShowInfo(v => !v)}
+            className={`p-2 rounded-full transition-colors ${showInfo ? "bg-blue-100 text-blue-600" : "hover:bg-gray-100 text-gray-500"}`}>
+            <Info className="h-5 w-5" />
           </button>
         )}
       </div>
 
-      {/* Input area */}
-      <div className="flex-shrink-0 border-t border-border bg-background px-4 py-3">
-        {/* Reply/Edit indicator */}
-        {(replyTo || editingMsg) && (
-          <div className="flex items-center justify-between mb-2 bg-muted rounded-lg px-3 py-1.5 text-xs">
-            <div className="flex items-center gap-2 min-w-0">
-              {replyTo ? (
-                <>
-                  <Reply className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-                  <span className="text-muted-foreground">Replying to <strong>{replyTo.user.displayName || replyTo.user.username}</strong>: {replyTo.content.slice(0, 50)}…</span>
-                </>
-              ) : (
-                <>
-                  <Pencil className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-                  <span className="text-muted-foreground">Editing message</span>
-                </>
-              )}
+      {/* Group info panel */}
+      {showInfo && !isDm && (
+        <div className="border-b border-gray-100 bg-gray-50 px-4 py-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Members ({memberCount})</span>
+            {!isEveryoneConv && currentUser && (
+              <button onClick={() => setAddingMember(v => !v)}
+                className="flex items-center gap-1 text-xs text-blue-600 font-medium hover:text-blue-700">
+                <UserPlus className="h-3.5 w-3.5" /> Add
+              </button>
+            )}
+          </div>
+          {addingMember && (
+            <div className="mb-3">
+              <UserSearchInput onSelect={handleAddMember} excluded={conv.members?.map(m => m.id)} label="Search users to add..." />
             </div>
-            <button onClick={replyTo ? cancelReply : cancelEdit} className="p-0.5 text-muted-foreground hover:text-foreground ml-2">
-              <X className="w-3.5 h-3.5" />
+          )}
+          <div className="flex flex-wrap gap-2">
+            {conv.members?.map(m => (
+              <div key={m.id} className="flex items-center gap-1.5 bg-white rounded-full px-2.5 py-1 border border-gray-200 text-xs text-gray-700">
+                <Avatar className="h-5 w-5">
+                  {m.avatarUrl && <AvatarImage src={m.avatarUrl} />}
+                  <AvatarFallback className="text-[9px] bg-blue-100 text-blue-700">{initials(m)}</AvatarFallback>
+                </Avatar>
+                {m.displayName || m.username}
+                {m.id === currentUser?.id && <span className="text-gray-400">(you)</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Messages area */}
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-0.5">
+        {loading ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-gray-400 text-sm">Loading messages...</div>
+          </div>
+        ) : messages.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full gap-2">
+            <div className="h-16 w-16 rounded-full bg-gray-100 flex items-center justify-center">
+              <MessageSquarePlus className="h-8 w-8 text-gray-300" />
+            </div>
+            <p className="text-gray-400 text-sm">No messages yet — say hi!</p>
+          </div>
+        ) : (
+          messages.map((msg, i) => (
+            <div key={msg.id}>
+              {shouldShowDateSeparator(messages, i) && (
+                <div className="flex items-center gap-3 my-4">
+                  <div className="flex-1 h-px bg-gray-200" />
+                  <span className="text-xs text-gray-400 font-medium">{formatDateSeparator(msg.createdAt)}</span>
+                  <div className="flex-1 h-px bg-gray-200" />
+                </div>
+              )}
+              <MessageBubble
+                msg={msg}
+                isMine={msg.userId === currentUser?.id}
+                allMessages={messages}
+                currentUserId={currentUser?.id}
+                onReply={setReplyTo}
+                onEdit={handleEdit}
+                onDelete={handleDelete}
+                onReact={handleReact}
+              />
+            </div>
+          ))
+        )}
+        <div ref={bottomRef} />
+      </div>
+
+      {/* Input */}
+      <MessageInput
+        onSend={handleSend}
+        replyTo={replyTo}
+        onCancelReply={() => setReplyTo(null)}
+        disabled={!currentUser}
+      />
+    </div>
+  );
+}
+
+// ─── Main Messages Page ───────────────────────────────────────────────────────
+
+export default function Messages() {
+  const { user } = useAuth();
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [activeConvId, setActiveConvId] = useState<string | null>(null);
+  const [showSidebar, setShowSidebar] = useState(true);
+  const [showNewModal, setShowNewModal] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [convLoading, setConvLoading] = useState(true);
+  const { toast } = useToast();
+
+  // Fetch conversations
+  const fetchConversations = useCallback(async () => {
+    if (!user) {
+      // Even logged-out users can see the "everyone" conversation
+      try {
+        const res = await fetch("/api/conversations/everyone-public");
+        // We'll just fetch the everyone conv ID another way
+      } catch {}
+      setConvLoading(false);
+      return;
+    }
+    try {
+      const res = await fetch("/api/conversations");
+      if (res.ok) {
+        const data: Conversation[] = await res.json();
+        setConversations(data);
+        // Auto-select "everyone" or first conversation
+        if (!activeConvId && data.length > 0) {
+          setActiveConvId(data[0].id);
+        }
+      }
+    } catch {} finally { setConvLoading(false); }
+  }, [user?.id]);
+
+  useEffect(() => {
+    fetchConversations();
+  }, [fetchConversations]);
+
+  // SSE for conversation-level events
+  useEffect(() => {
+    if (!user) return;
+    const es = new EventSource("/api/messages/sse");
+    es.addEventListener("conversation_created", e => {
+      const conv = JSON.parse(e.data) as Conversation;
+      setConversations(prev => prev.find(c => c.id === conv.id) ? prev : [conv, ...prev]);
+    });
+    es.addEventListener("message", e => {
+      const msg = JSON.parse(e.data) as Message;
+      setConversations(prev => prev.map(c =>
+        c.id === msg.conversationId ? { ...c, lastMessage: msg } : c
+      ).sort((a, b) => {
+        if (a.type === "everyone") return -1;
+        if (b.type === "everyone") return 1;
+        const at = a.lastMessage?.createdAt ? new Date(a.lastMessage.createdAt).getTime() : 0;
+        const bt = b.lastMessage?.createdAt ? new Date(b.lastMessage.createdAt).getTime() : 0;
+        return bt - at;
+      }));
+    });
+    return () => es.close();
+  }, [user?.id]);
+
+  const activeConv = conversations.find(c => c.id === activeConvId) || null;
+
+  const handleConvCreated = (conv: Conversation) => {
+    setConversations(prev => prev.find(c => c.id === conv.id) ? prev : [conv, ...prev]);
+    setActiveConvId(conv.id);
+  };
+
+  // If not logged in, just show the everyone chat in read-only mode + nudge
+  if (!user) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center gap-4 bg-gray-50">
+        <div className="h-20 w-20 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center">
+          <Users className="h-10 w-10 text-white" />
+        </div>
+        <div className="text-center">
+          <h2 className="text-xl font-bold text-gray-900">School Messages</h2>
+          <p className="text-gray-500 text-sm mt-1">Sign in to send messages and start conversations</p>
+        </div>
+        <Button onClick={() => setShowAuthModal(true)} className="rounded-full px-8">Sign In</Button>
+        {showAuthModal && <AuthModal open={showAuthModal} onClose={() => setShowAuthModal(false)} initialMode="login" />}
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full flex bg-white overflow-hidden">
+      {/* Sidebar */}
+      <div className={`${showSidebar ? "flex" : "hidden"} md:flex flex-col border-r border-gray-100 bg-white flex-shrink-0 w-full md:w-72 xl:w-80`}>
+        {/* Sidebar header */}
+        <div className="px-4 pt-4 pb-3 border-b border-gray-100">
+          <div className="flex items-center justify-between mb-3">
+            <h1 className="text-xl font-bold text-gray-900">Messages</h1>
+            <button onClick={() => setShowNewModal(true)}
+              className="p-2 rounded-full hover:bg-gray-100 text-blue-500 transition-colors">
+              <MessageSquarePlus className="h-5 w-5" />
             </button>
           </div>
-        )}
+        </div>
 
-        {/* Image preview */}
-        {imagePreview && (
-          <div className="mb-2 relative inline-block">
-            <img src={imagePreview} alt="preview" className="h-20 w-20 object-cover rounded-lg border border-border" />
-            <button
-              onClick={() => setImagePreview(null)}
-              className="absolute -top-1.5 -right-1.5 bg-background border border-border rounded-full p-0.5 text-muted-foreground hover:text-foreground"
-            ><X className="w-3 h-3" /></button>
-          </div>
-        )}
-
-        {!user && (
-          <div className="mb-2 text-xs text-muted-foreground text-center bg-muted rounded-lg py-2 px-3">
-            <button onClick={() => setShowAuthModal(true)} className="text-[#4285F4] hover:underline font-medium">Sign in</button> to send messages. You can still read the chat.
-          </div>
-        )}
-
-        <div className="flex items-end gap-2">
-          <div className="flex-1 min-w-0 relative">
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={user ? "Type a message… (Enter to send, Shift+Enter for new line)" : "Sign in to send messages"}
-              disabled={!user || sending}
-              className="w-full resize-none rounded-2xl border border-border bg-muted/30 px-4 py-2.5 text-sm outline-none focus:border-[#4285F4]/50 focus:ring-1 focus:ring-[#4285F4]/30 placeholder:text-muted-foreground disabled:opacity-50 min-h-[44px] max-h-[120px]"
-              rows={1}
-              data-testid="input-message"
-              style={{ height: "auto" }}
-              onInput={(e) => {
-                const t = e.currentTarget;
-                t.style.height = "auto";
-                t.style.height = Math.min(t.scrollHeight, 120) + "px";
-              }}
-            />
-          </div>
-          {user && (
-            <>
-              <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageSelect} />
-              <Button
-                size="icon"
-                variant="ghost"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={sending}
-                title="Attach image"
-                data-testid="button-attach-image"
-                className="flex-shrink-0"
-              >
-                <ImageIcon className="w-4 h-4" />
-              </Button>
-            </>
+        {/* Conversation list */}
+        <div className="flex-1 overflow-y-auto px-2 py-2">
+          {convLoading ? (
+            <div className="flex flex-col gap-2 p-2">
+              {[1, 2, 3].map(i => <div key={i} className="h-14 bg-gray-100 rounded-xl animate-pulse" />)}
+            </div>
+          ) : conversations.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-40 text-center px-4 gap-2">
+              <p className="text-gray-400 text-sm">No conversations yet</p>
+              <button onClick={() => setShowNewModal(true)} className="text-blue-500 text-sm font-medium hover:underline">
+                Start one
+              </button>
+            </div>
+          ) : (
+            conversations.map(conv => (
+              <ConversationItem
+                key={conv.id}
+                conv={conv}
+                isActive={conv.id === activeConvId}
+                currentUserId={user.id}
+                onClick={() => { setActiveConvId(conv.id); setShowSidebar(false); }}
+              />
+            ))
           )}
-          <Button
-            size="icon"
-            onClick={user ? handleSend : () => setShowAuthModal(true)}
-            disabled={sending || (user ? (!input.trim() && !imagePreview) : false)}
-            data-testid="button-send-message"
-            className="flex-shrink-0 bg-[#4285F4] hover:bg-[#3b73d8] text-white"
-          >
-            {sending ? (
-              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-            ) : (
-              <Send className="w-4 h-4" />
-            )}
-          </Button>
         </div>
       </div>
 
-      <AuthModal open={showAuthModal} onClose={() => setShowAuthModal(false)} />
+      {/* Thread panel */}
+      <div className={`flex-1 flex flex-col min-w-0 ${!showSidebar || activeConv ? "flex" : "hidden md:flex"}`}>
+        {activeConv ? (
+          <ConversationThread
+            key={activeConv.id}
+            conv={activeConv}
+            currentUser={user}
+            onBack={() => setShowSidebar(true)}
+          />
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-4">
+            <div className="h-20 w-20 rounded-full bg-gray-100 flex items-center justify-center">
+              <MessageSquarePlus className="h-10 w-10 text-gray-300" />
+            </div>
+            <h3 className="text-lg font-semibold text-gray-700">Select a conversation</h3>
+            <p className="text-gray-400 text-sm">Choose from your conversations or start a new one</p>
+            <Button variant="outline" onClick={() => setShowNewModal(true)} className="rounded-full mt-1">
+              <Plus className="h-4 w-4 mr-1" /> New Message
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {/* New conversation modal */}
+      {showNewModal && (
+        <NewConversationModal
+          onClose={() => setShowNewModal(false)}
+          onCreated={handleConvCreated}
+        />
+      )}
     </div>
   );
 }

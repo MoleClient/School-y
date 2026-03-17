@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -66,15 +66,38 @@ export const insertHistoryItemSchema = createInsertSchema(historyItems).omit({
 export type InsertHistoryItem = z.infer<typeof insertHistoryItemSchema>;
 export type HistoryItem = typeof historyItems.$inferSelect;
 
-// School Messages
+// Conversations (everyone, dm, group)
+export const conversations = pgTable("conversations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name"),
+  type: text("type").notNull().default("dm"), // "everyone" | "dm" | "group"
+  createdBy: varchar("created_by").references(() => users.id),
+  avatarUrl: text("avatar_url"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type Conversation = typeof conversations.$inferSelect;
+
+export const conversationMembers = pgTable("conversation_members", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  conversationId: varchar("conversation_id").notNull().references(() => conversations.id),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  joinedAt: timestamp("joined_at").defaultNow().notNull(),
+});
+
+export type ConversationMember = typeof conversationMembers.$inferSelect;
+
+// Chat messages (now belong to a conversation)
 export const chatMessages = pgTable("chat_messages", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  conversationId: varchar("conversation_id").references(() => conversations.id),
   userId: varchar("user_id").notNull().references(() => users.id),
   content: text("content").notNull(),
   imageUrl: text("image_url"),
   replyToId: varchar("reply_to_id"),
   editedAt: timestamp("edited_at"),
   originalContent: text("original_content"),
+  isSystem: boolean("is_system").default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

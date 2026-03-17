@@ -17,12 +17,19 @@ import * as cheerio from 'cheerio';
 import { writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 
-// SSE clients for live chat broadcast
-const chatSseClients = new Set<any>();
-function broadcastChat(event: string, data: any) {
+// SSE clients: userId → Set<Response> for targeted delivery
+const chatSseClients = new Map<string, Set<any>>();
+function broadcastToUsers(userIds: string[], event: string, data: any) {
   const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-  for (const res of chatSseClients) {
-    try { res.write(payload); } catch {}
+  for (const uid of userIds) {
+    const conns = chatSseClients.get(uid);
+    if (conns) for (const res of conns) { try { res.write(payload); } catch {} }
+  }
+}
+function broadcastToAll(event: string, data: any) {
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const conns of chatSseClients.values()) {
+    for (const res of conns) { try { res.write(payload); } catch {} }
   }
 }
 
@@ -480,6 +487,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.createUser({ username, password });
       const session = await storage.createSession(user.id);
 
+      // Add to "Everyone" conversation and post join message
+      try {
+        await storage.ensureUserInEveryone(user.id);
+        const everyoneConv = await storage.getOrCreateEveryoneConversation();
+        const sysMsg = await storage.createConversationMessage({
+          conversationId: everyoneConv.id, userId: user.id,
+          content: `${username} has joined the chat!`,
+          isSystem: true,
+        });
+        const memberIds = await storage.getConversationMemberIds(everyoneConv.id);
+        broadcastToUsers(memberIds, "message", {
+          ...sysMsg, user: { id: user.id, username, displayName: null, avatarUrl: null }, reactions: [],
+        });
+      } catch {}
+
       res.cookie("schooly_session", session.token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
@@ -506,6 +528,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!valid) return res.status(401).json({ error: "Invalid username or password" });
 
       const session = await storage.createSession(user.id);
+      // Ensure user is in everyone conversation (backfill for pre-existing users)
+      storage.ensureUserInEveryone(user.id).catch(() => {});
 
       res.cookie("schooly_session", session.token, {
         httpOnly: true,
@@ -617,28 +641,155 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ── School Messages (Chat) ────────────────────────────────────────────────
-  // SSE endpoint for real-time chat updates
-  app.get("/api/messages/sse", (req, res) => {
+  // ── Conversations & Messages ──────────────────────────────────────────────
+
+  // SSE endpoint — authenticated users get targeted delivery
+  app.get("/api/messages/sse", async (req: any, res) => {
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
     res.setHeader("X-Accel-Buffering", "no");
     res.flushHeaders();
     res.write(": connected\n\n");
-    chatSseClients.add(res);
+    const user = await getSessionUser(req);
+    const uid = user?.id || `anon-${Math.random()}`;
+    if (!chatSseClients.has(uid)) chatSseClients.set(uid, new Set());
+    chatSseClients.get(uid)!.add(res);
     const keepAlive = setInterval(() => { try { res.write(": ping\n\n"); } catch {} }, 20000);
-    req.on("close", () => { chatSseClients.delete(res); clearInterval(keepAlive); });
+    req.on("close", () => {
+      chatSseClients.get(uid)?.delete(res);
+      if (chatSseClients.get(uid)?.size === 0) chatSseClients.delete(uid);
+      clearInterval(keepAlive);
+    });
   });
 
-  // Get messages with reactions
-  app.get("/api/messages", async (req, res) => {
+  // Search users
+  app.get("/api/users/search", async (req: any, res) => {
+    const user = await getSessionUser(req);
+    if (!user) return res.status(401).json({ error: "Not logged in" });
+    const q = (req.query.q as string) || "";
     try {
-      const msgs = await storage.getChatMessages(100);
-      const messageIds = msgs.map(m => m.id);
+      const results = await storage.searchUsers(q, user.id);
+      res.json(results);
+    } catch {
+      res.status(500).json({ error: "Search failed" });
+    }
+  });
+
+  // List user's conversations
+  app.get("/api/conversations", async (req: any, res) => {
+    const user = await getSessionUser(req);
+    if (!user) return res.status(401).json({ error: "Not logged in" });
+    try {
+      const convs = await storage.getUserConversations(user.id);
+      res.json(convs);
+    } catch {
+      res.status(500).json({ error: "Failed to fetch conversations" });
+    }
+  });
+
+  // Get or create DM conversation
+  app.post("/api/conversations/dm", async (req: any, res) => {
+    const user = await getSessionUser(req);
+    if (!user) return res.status(401).json({ error: "Not logged in" });
+    const { targetUserId } = req.body as any;
+    if (!targetUserId) return res.status(400).json({ error: "targetUserId required" });
+    try {
+      let conv = await storage.getDmConversation(user.id, targetUserId);
+      if (!conv) conv = await storage.createDmConversation(user.id, targetUserId);
+      const members = await storage.getConversationMembers(conv.id);
+      const other = members.find(m => m.id !== user.id);
+      res.json({ ...conv, displayName: other?.displayName || other?.username, avatarUrl: other?.avatarUrl, members });
+    } catch {
+      res.status(500).json({ error: "Failed to create DM" });
+    }
+  });
+
+  // Create group conversation
+  app.post("/api/conversations/group", async (req: any, res) => {
+    const user = await getSessionUser(req);
+    if (!user) return res.status(401).json({ error: "Not logged in" });
+    const { name, memberIds } = req.body as any;
+    if (!name?.trim()) return res.status(400).json({ error: "Group name required" });
+    if (!Array.isArray(memberIds) || memberIds.length === 0) return res.status(400).json({ error: "At least one other member required" });
+    try {
+      const conv = await storage.createGroupConversation(name.trim(), user.id, memberIds);
+      // Post system message
+      const systemUser = user;
+      const sysMsg = await storage.createConversationMessage({
+        conversationId: conv.id, userId: user.id,
+        content: `${user.displayName || user.username} created the group "${name.trim()}"`,
+        isSystem: true,
+      });
+      const members = await storage.getConversationMembers(conv.id);
+      const memberIds2 = members.map(m => m.id);
+      broadcastToUsers(memberIds2, "conversation_created", { ...conv, displayName: conv.name, members });
+      res.json({ ...conv, members });
+    } catch {
+      res.status(500).json({ error: "Failed to create group" });
+    }
+  });
+
+  // Add member to group
+  app.post("/api/conversations/:id/members", async (req: any, res) => {
+    const user = await getSessionUser(req);
+    if (!user) return res.status(401).json({ error: "Not logged in" });
+    const { userId: newMemberId } = req.body as any;
+    if (!newMemberId) return res.status(400).json({ error: "userId required" });
+    try {
+      const isMember = await storage.isConversationMember(req.params.id, user.id);
+      if (!isMember) return res.status(403).json({ error: "Not a member" });
+      await storage.addConversationMember(req.params.id, newMemberId);
+      const newUser = await storage.getUser(newMemberId);
+      // Post system message
+      const sysMsg = await storage.createConversationMessage({
+        conversationId: req.params.id, userId: user.id,
+        content: `${user.displayName || user.username} added ${newUser?.displayName || newUser?.username || "someone"}`,
+        isSystem: true,
+      });
+      const memberIds = await storage.getConversationMemberIds(req.params.id);
+      const sysPayload = { ...sysMsg, user: { id: user.id, username: user.username, displayName: user.displayName, avatarUrl: user.avatarUrl }, reactions: [] };
+      broadcastToUsers(memberIds, "message", { ...sysPayload, conversationId: req.params.id });
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ error: "Failed to add member" });
+    }
+  });
+
+  // Rename group conversation
+  app.patch("/api/conversations/:id", async (req: any, res) => {
+    const user = await getSessionUser(req);
+    if (!user) return res.status(401).json({ error: "Not logged in" });
+    const { name } = req.body as any;
+    if (!name?.trim()) return res.status(400).json({ error: "name required" });
+    try {
+      const isMember = await storage.isConversationMember(req.params.id, user.id);
+      if (!isMember) return res.status(403).json({ error: "Not a member" });
+      await storage.updateConversationName(req.params.id, name.trim());
+      const memberIds = await storage.getConversationMemberIds(req.params.id);
+      broadcastToUsers(memberIds, "conversation_updated", { id: req.params.id, name: name.trim() });
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ error: "Failed to rename" });
+    }
+  });
+
+  // Get messages for a conversation (with reactions)
+  app.get("/api/conversations/:id/messages", async (req: any, res) => {
+    const user = await getSessionUser(req);
+    const convId = req.params.id;
+    try {
+      const conv = await storage.getConversationById(convId);
+      if (!conv) return res.status(404).json({ error: "Conversation not found" });
+      // Everyone conversation is public-readable
+      if (conv.type !== "everyone" && user) {
+        const isMember = await storage.isConversationMember(convId, user.id);
+        if (!isMember) return res.status(403).json({ error: "Not a member" });
+      }
+      const msgs = await storage.getConversationMessages(convId);
       const allReactions: any[] = [];
-      for (const id of messageIds) {
-        const rxns = await storage.getReactionsByMessage(id);
+      for (const m of msgs) {
+        const rxns = await storage.getReactionsByMessage(m.id);
         allReactions.push(...rxns);
       }
       const reactionsByMsg: Record<string, any[]> = {};
@@ -646,30 +797,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!reactionsByMsg[r.messageId]) reactionsByMsg[r.messageId] = [];
         reactionsByMsg[r.messageId].push(r);
       }
-      const result = msgs.map(m => ({ ...m, reactions: reactionsByMsg[m.id] || [] }));
-      res.json(result);
+      res.json(msgs.map(m => ({ ...m, reactions: reactionsByMsg[m.id] || [] })));
     } catch {
       res.status(500).json({ error: "Failed to fetch messages" });
     }
   });
 
-  // Post a message
-  app.post("/api/messages", async (req: any, res) => {
+  // Post message to conversation
+  app.post("/api/conversations/:id/messages", async (req: any, res) => {
     const user = await getSessionUser(req);
     if (!user) return res.status(401).json({ error: "Not logged in" });
+    const convId = req.params.id;
     const { content, imageUrl, replyToId } = req.body as any;
     if (!content?.trim() && !imageUrl) return res.status(400).json({ error: "Message cannot be empty" });
-    if (content && content.length > 2000) return res.status(400).json({ error: "Message too long" });
     try {
-      const msg = await storage.createChatMessage({
-        userId: user.id,
-        content: content?.trim() || "",
-        imageUrl: imageUrl || null,
-        replyToId: replyToId || null,
+      const isMember = await storage.isConversationMember(convId, user.id);
+      if (!isMember) return res.status(403).json({ error: "Not a member" });
+      const msg = await storage.createConversationMessage({
+        conversationId: convId, userId: user.id,
+        content: content?.trim() || "", imageUrl: imageUrl || null, replyToId: replyToId || null,
       });
       const fullUser = { id: user.id, username: user.username, displayName: user.displayName, avatarUrl: user.avatarUrl };
       const payload = { ...msg, user: fullUser, reactions: [] };
-      broadcastChat("message", payload);
+      const memberIds = await storage.getConversationMemberIds(convId);
+      broadcastToUsers(memberIds, "message", payload);
       res.json(payload);
     } catch {
       res.status(500).json({ error: "Failed to send message" });
@@ -687,7 +838,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!msg) return res.status(404).json({ error: "Message not found or not yours" });
       const fullUser = { id: user.id, username: user.username, displayName: user.displayName, avatarUrl: user.avatarUrl };
       const payload = { ...msg, user: fullUser };
-      broadcastChat("message_edited", payload);
+      if (msg.conversationId) {
+        const memberIds = await storage.getConversationMemberIds(msg.conversationId);
+        broadcastToUsers(memberIds, "message_edited", payload);
+      }
       res.json(payload);
     } catch {
       res.status(500).json({ error: "Failed to edit message" });
@@ -699,8 +853,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const user = await getSessionUser(req);
     if (!user) return res.status(401).json({ error: "Not logged in" });
     try {
+      const msg = await storage.getChatMessage(req.params.id);
       await storage.deleteChatMessage(req.params.id, user.id);
-      broadcastChat("message_deleted", { id: req.params.id });
+      if (msg?.conversationId) {
+        const memberIds = await storage.getConversationMemberIds(msg.conversationId);
+        broadcastToUsers(memberIds, "message_deleted", { id: req.params.id, conversationId: msg.conversationId });
+      }
       res.json({ ok: true });
     } catch {
       res.status(500).json({ error: "Failed to delete message" });
@@ -716,13 +874,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const existing = await storage.getReactionsByMessage(req.params.id);
       const mine = existing.find(r => r.userId === user.id && r.emoji === emoji);
-      if (mine) {
-        await storage.removeReaction(req.params.id, user.id, emoji);
-      } else {
-        await storage.addReaction(req.params.id, user.id, emoji);
-      }
+      if (mine) await storage.removeReaction(req.params.id, user.id, emoji);
+      else await storage.addReaction(req.params.id, user.id, emoji);
       const updated = await storage.getReactionsByMessage(req.params.id);
-      broadcastChat("reactions_updated", { messageId: req.params.id, reactions: updated });
+      const msg = await storage.getChatMessage(req.params.id);
+      if (msg?.conversationId) {
+        const memberIds = await storage.getConversationMemberIds(msg.conversationId);
+        broadcastToUsers(memberIds, "reactions_updated", { messageId: req.params.id, reactions: updated, conversationId: msg.conversationId });
+      }
       res.json({ reactions: updated });
     } catch {
       res.status(500).json({ error: "Failed to toggle reaction" });
