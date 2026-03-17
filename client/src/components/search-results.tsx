@@ -1,11 +1,14 @@
 import { useState, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { SearchResult } from "@shared/schema";
-import { Search, Globe, Clock, ExternalLink } from "lucide-react";
+import { Search, Globe, Clock, ExternalLink, MessageSquare } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SchoolyLogo } from "./schooly-logo";
 import { AIOverview } from "./ai-overview";
 import { AIMode } from "./ai-mode";
+import { AccountMenu } from "./account-menu";
+import { StorePopup } from "./store-popup";
+import { useLocation } from "wouter";
 
 interface SearchResultsProps {
   query: string;
@@ -54,8 +57,10 @@ function SearchBar({
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [showSugg, setShowSugg] = useState(false);
   const [selIdx, setSelIdx] = useState(-1);
+  const [showStore, setShowStore] = useState(false);
   const suggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [, setLocation] = useLocation();
 
   useEffect(() => { setInputVal(query); }, [query]);
 
@@ -99,8 +104,9 @@ function SearchBar({
 
   return (
     <div className="sticky top-0 z-50 bg-background border-b border-border">
+      {showStore && <StorePopup onClose={() => setShowStore(false)} />}
       <div className="px-4 pt-3 pb-0">
-        <div className="max-w-[760px] flex items-center gap-4" style={{ marginLeft: "clamp(0px, 4vw, 40px)" }}>
+        <div className="flex items-center gap-4" style={{ marginLeft: "clamp(0px, 4vw, 40px)" }}>
           <div className="flex-shrink-0">
             <SchoolyLogo size="small" onClick={() => onSearch("")} />
           </div>
@@ -133,6 +139,33 @@ function SearchBar({
                 ))}
               </div>
             )}
+          </div>
+          {/* Right-side nav: About, Store, Messages, Account */}
+          <div className="flex items-center gap-3 ml-auto flex-shrink-0">
+            <button
+              onClick={() => setLocation("/about")}
+              className="text-[13px] text-foreground/80 hover:underline bg-transparent border-none whitespace-nowrap"
+              data-testid="button-about"
+            >
+              About
+            </button>
+            <button
+              onClick={() => setShowStore(true)}
+              className="text-[13px] text-foreground/80 hover:underline bg-transparent border-none whitespace-nowrap"
+              data-testid="button-store"
+            >
+              Store
+            </button>
+            <button
+              onClick={() => setLocation("/messages")}
+              className="flex items-center gap-1.5 text-[13px] text-[#4285F4] hover:underline bg-transparent border-none font-medium whitespace-nowrap"
+              data-testid="button-messages"
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              <span>Messages</span>
+              <span className="px-1 py-px text-[9px] font-bold bg-[#EA4335] text-white rounded-full uppercase tracking-wide leading-none">NEW</span>
+            </button>
+            <AccountMenu />
           </div>
         </div>
       </div>

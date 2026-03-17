@@ -3,6 +3,7 @@ import { RefreshCw, AlertTriangle, Archive, Globe, ExternalLink } from "lucide-r
 import { Button } from "@/components/ui/button";
 import { RemoteBrowser } from "./remote-browser";
 import { useAuth } from "@/contexts/AuthContext";
+import { queryClient } from "@/lib/queryClient";
 
 declare global {
   interface Window {
@@ -150,6 +151,25 @@ export function WebpageViewer({ url, onUrlChange, onNavigate }: WebpageViewerPro
   const useRemoteBrowser = cleanUrl ? REMOTE_BROWSER_SITES.some(s => cleanUrl.includes(s)) : false;
   const proxyUrl = (cleanUrl && !useRemoteBrowser) ? toProxyUrl(cleanUrl, uvReady && !uvFailed) : "";
 
+  // Save history whenever cleanUrl changes (catches UV proxy navigations where onLoad may not fire reliably)
+  useEffect(() => {
+    if (!cleanUrl || !userRef.current) return;
+    const timer = setTimeout(() => {
+      if (!userRef.current || !cleanUrl) return;
+      let title: string;
+      try { title = new URL(cleanUrl).hostname.replace("www.", ""); } catch { title = cleanUrl; }
+      fetch("/api/user/history", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: cleanUrl, title, favicon: null }),
+      }).then(() => {
+        queryClient.invalidateQueries({ queryKey: ["/api/user/history"] });
+      }).catch(() => {});
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [cleanUrl]);
+
   // Listen for navigation messages from proxy iframe
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
@@ -259,6 +279,8 @@ export function WebpageViewer({ url, onUrlChange, onNavigate }: WebpageViewerPro
           credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url: cleanUrlRef.current, title: pageTitle || cleanUrlRef.current, favicon }),
+        }).then(() => {
+          queryClient.invalidateQueries({ queryKey: ["/api/user/history"] });
         }).catch(() => {});
       } catch {
         // cross-origin iframe — use URL as title
@@ -269,6 +291,8 @@ export function WebpageViewer({ url, onUrlChange, onNavigate }: WebpageViewerPro
             credentials: "include",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ url: cleanUrlRef.current, title: hostname, favicon: null }),
+          }).then(() => {
+            queryClient.invalidateQueries({ queryKey: ["/api/user/history"] });
           }).catch(() => {});
         } catch {}
       }
