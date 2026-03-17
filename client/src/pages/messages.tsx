@@ -405,6 +405,7 @@ function MessageInput({
   const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
   const [focused, setFocused] = useState(false);
+  const { toast } = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const lastTypingBroadcast = useRef<number>(0);
@@ -442,14 +443,26 @@ function MessageInput({
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) { alert("Max 5MB"); return; }
+    // Reset input so same file can be re-selected if needed
+    e.target.value = "";
     setUploading(true);
     const reader = new FileReader();
     reader.onload = async () => {
       try {
         const res = await apiRequest("POST", "/api/upload", { dataUrl: reader.result, filename: file.name });
         const data = await res.json();
-        setImageUrl(data.url);
-      } catch { alert("Upload failed"); }
+        if (data.blocked) {
+          toast({
+            title: "Image blocked",
+            description: "That image isn't appropriate for School-y. It wasn't attached.",
+            variant: "destructive",
+          });
+        } else if (data.url) {
+          setImageUrl(data.url);
+        }
+      } catch {
+        toast({ title: "Upload failed", variant: "destructive" });
+      }
       setUploading(false);
     };
     reader.readAsDataURL(file);

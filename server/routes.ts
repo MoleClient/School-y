@@ -634,6 +634,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ext = matches[1].replace("jpeg", "jpg");
       const buffer = Buffer.from(matches[2], "base64");
       if (buffer.length > 5 * 1024 * 1024) return res.status(400).json({ error: "Image too large (max 5MB)" });
+
+      // ── Vision review before saving ──────────────────────────────────────
+      if (process.env.OPENROUTER_API_KEY) {
+        try {
+          const visionResp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+              "Content-Type": "application/json",
+              "HTTP-Referer": "https://school-y.replit.app",
+              "X-Title": "School-y Image Moderator",
+            },
+            body: JSON.stringify({
+              model: "openai/gpt-4o",
+              messages: [{
+                role: "user",
+                content: [
+                  {
+                    type: "text",
+                    text: `You are an image content moderator for a school platform. Is this image appropriate for a school environment?
+Inappropriate: nudity, explicit/sexual content, graphic violence, hate symbols, drugs, weapons used threateningly.
+Respond ONLY with valid JSON: {"safe":true} or {"safe":false}. Nothing else.`,
+                  },
+                  { type: "image_url", image_url: { url: dataUrl } },
+                ],
+              }],
+              max_tokens: 20,
+              temperature: 0,
+            }),
+          });
+          if (visionResp.ok) {
+            const visionData: any = await visionResp.json();
+            const raw = visionData.choices?.[0]?.message?.content?.trim();
+            if (raw) {
+              const result = JSON.parse(raw);
+              if (!result.safe) {
+                return res.json({ blocked: true });
+              }
+            }
+          }
+        } catch {
+          // If vision check fails, allow the upload (fail open)
+        }
+      }
+
       const name = `${user.id}-${Date.now()}.${ext}`;
       const uploadPath = join(process.cwd(), "public", "uploads", name);
       writeFileSync(uploadPath, buffer);
