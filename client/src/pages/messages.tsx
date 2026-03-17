@@ -732,25 +732,20 @@ function ConversationThread({ conv, currentUser, onBack, readOnly }: {
       setMessages(prev => prev.find(m => m.id === msg.id) ? prev : [...prev, msg]);
     });
     es.addEventListener("message_edited", e => {
-      const { messageId, content, editedAt, originalContent } = JSON.parse(e.data);
-      if (messageId) setMessages(prev => prev.map(m =>
-        m.id === messageId ? { ...m, content, editedAt, originalContent } : m
+      const { id, content, editedAt, originalContent } = JSON.parse(e.data);
+      if (id) setMessages(prev => prev.map(m =>
+        m.id === id ? { ...m, content, editedAt, originalContent } : m
       ));
     });
     es.addEventListener("message_deleted", e => {
-      const { messageId } = JSON.parse(e.data);
-      if (messageId) setMessages(prev => prev.filter(m => m.id !== messageId));
+      const { id } = JSON.parse(e.data);
+      if (id) setMessages(prev => prev.filter(m => m.id !== id));
     });
-    es.addEventListener("reaction_added", e => {
-      const reaction = JSON.parse(e.data) as MessageReaction;
+    es.addEventListener("reactions_updated", e => {
+      const { messageId, reactions, conversationId } = JSON.parse(e.data);
+      if (conversationId !== conv.id) return;
       setMessages(prev => prev.map(m =>
-        m.id === reaction.messageId ? { ...m, reactions: [...m.reactions.filter(r => !(r.userId === reaction.userId && r.emoji === reaction.emoji)), reaction] } : m
-      ));
-    });
-    es.addEventListener("reaction_removed", e => {
-      const { messageId, userId, emoji } = JSON.parse(e.data);
-      setMessages(prev => prev.map(m =>
-        m.id === messageId ? { ...m, reactions: m.reactions.filter(r => !(r.userId === userId && r.emoji === emoji)) } : m
+        m.id === messageId ? { ...m, reactions } : m
       ));
     });
     return () => es.close();
@@ -784,7 +779,7 @@ function ConversationThread({ conv, currentUser, onBack, readOnly }: {
 
   const handleReact = async (msgId: string, emoji: string) => {
     try {
-      await apiRequest("POST", `/api/conversations/${conv.id}/messages/${msgId}/react`, { emoji });
+      await apiRequest("POST", `/api/messages/${msgId}/reactions`, { emoji });
     } catch {}
   };
 
