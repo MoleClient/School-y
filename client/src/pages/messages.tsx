@@ -713,7 +713,7 @@ function ConversationThread({ conv, currentUser, onBack }: {
   const memberCount = conv.members?.length || 0;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0">
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 bg-white">
         <button onClick={onBack} className="p-1.5 rounded-full hover:bg-gray-100 text-gray-500 md:hidden">
@@ -784,43 +784,47 @@ function ConversationThread({ conv, currentUser, onBack }: {
         </div>
       )}
 
-      {/* Messages area */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-0.5">
-        {loading ? (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-gray-400 text-sm">Loading messages...</div>
-          </div>
-        ) : messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full gap-2">
-            <div className="h-16 w-16 rounded-full bg-gray-100 flex items-center justify-center">
-              <MessageSquarePlus className="h-8 w-8 text-gray-300" />
+      {/* Messages area — flex-1 with min-h-0 so it can shrink; inner div pushes content to bottom */}
+      <div className="flex-1 overflow-y-auto min-h-0">
+        <div className="flex flex-col justify-end min-h-full px-4 py-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-16">
+              <div className="text-gray-400 text-sm">Loading messages...</div>
             </div>
-            <p className="text-gray-400 text-sm">No messages yet — say hi!</p>
-          </div>
-        ) : (
-          messages.map((msg, i) => (
-            <div key={msg.id}>
-              {shouldShowDateSeparator(messages, i) && (
-                <div className="flex items-center gap-3 my-4">
-                  <div className="flex-1 h-px bg-gray-200" />
-                  <span className="text-xs text-gray-400 font-medium">{formatDateSeparator(msg.createdAt)}</span>
-                  <div className="flex-1 h-px bg-gray-200" />
+          ) : messages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 gap-2">
+              <div className="h-16 w-16 rounded-full bg-gray-100 flex items-center justify-center">
+                <MessageSquarePlus className="h-8 w-8 text-gray-300" />
+              </div>
+              <p className="text-gray-400 text-sm">No messages yet — say hi!</p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-0.5">
+              {messages.map((msg, i) => (
+                <div key={msg.id}>
+                  {shouldShowDateSeparator(messages, i) && (
+                    <div className="flex items-center gap-3 my-4">
+                      <div className="flex-1 h-px bg-gray-200" />
+                      <span className="text-xs text-gray-400 font-medium">{formatDateSeparator(msg.createdAt)}</span>
+                      <div className="flex-1 h-px bg-gray-200" />
+                    </div>
+                  )}
+                  <MessageBubble
+                    msg={msg}
+                    isMine={msg.userId === currentUser?.id}
+                    allMessages={messages}
+                    currentUserId={currentUser?.id}
+                    onReply={setReplyTo}
+                    onEdit={handleEdit}
+                    onDelete={handleDelete}
+                    onReact={handleReact}
+                  />
                 </div>
-              )}
-              <MessageBubble
-                msg={msg}
-                isMine={msg.userId === currentUser?.id}
-                allMessages={messages}
-                currentUserId={currentUser?.id}
-                onReply={setReplyTo}
-                onEdit={handleEdit}
-                onDelete={handleDelete}
-                onReact={handleReact}
-              />
+              ))}
             </div>
-          ))
-        )}
-        <div ref={bottomRef} />
+          )}
+          <div ref={bottomRef} />
+        </div>
       </div>
 
       {/* Input */}
@@ -904,30 +908,39 @@ export default function Messages() {
     setActiveConvId(conv.id);
   };
 
-  // If not logged in, just show the everyone chat in read-only mode + nudge
+  // If not logged in, show centered sign-in prompt
   if (!user) {
     return (
-      <div className="h-full flex flex-col items-center justify-center gap-4 bg-gray-50">
-        <div className="h-20 w-20 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center">
-          <Users className="h-10 w-10 text-white" />
+      <div className="h-screen flex flex-col items-center justify-center gap-5 bg-gray-50">
+        <div className="h-24 w-24 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center shadow-lg">
+          <Users className="h-12 w-12 text-white" />
         </div>
         <div className="text-center">
-          <h2 className="text-xl font-bold text-gray-900">School Messages</h2>
-          <p className="text-gray-500 text-sm mt-1">Sign in to send messages and start conversations</p>
+          <h2 className="text-2xl font-bold text-gray-900">School Messages</h2>
+          <p className="text-gray-500 text-sm mt-2 max-w-xs">Sign in to chat with everyone, send direct messages, and create group chats</p>
         </div>
-        <Button onClick={() => setShowAuthModal(true)} className="rounded-full px-8">Sign In</Button>
+        <div className="flex gap-3">
+          <Button onClick={() => setShowAuthModal(true)} className="rounded-full px-8">Sign In</Button>
+          <Button variant="outline" onClick={() => { setShowAuthModal(true); }} className="rounded-full px-8">Create Account</Button>
+        </div>
+        <a href="/" className="text-sm text-blue-500 hover:underline mt-2">← Back to School-y</a>
         {showAuthModal && <AuthModal open={showAuthModal} onClose={() => setShowAuthModal(false)} initialMode="login" />}
       </div>
     );
   }
 
   return (
-    <div className="h-full flex bg-white overflow-hidden">
+    <div className="h-screen flex bg-white overflow-hidden">
       {/* Sidebar */}
       <div className={`${showSidebar ? "flex" : "hidden"} md:flex flex-col border-r border-gray-100 bg-white flex-shrink-0 w-full md:w-72 xl:w-80`}>
         {/* Sidebar header */}
         <div className="px-4 pt-4 pb-3 border-b border-gray-100">
-          <div className="flex items-center justify-between mb-3">
+          {/* School-y back link */}
+          <a href="/" className="flex items-center gap-1 text-xs text-gray-400 hover:text-blue-500 transition-colors mb-3 w-fit">
+            <ChevronLeft className="h-3.5 w-3.5" />
+            <span>School-y</span>
+          </a>
+          <div className="flex items-center justify-between">
             <h1 className="text-xl font-bold text-gray-900">Messages</h1>
             <button onClick={() => setShowNewModal(true)}
               className="p-2 rounded-full hover:bg-gray-100 text-blue-500 transition-colors">
