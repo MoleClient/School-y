@@ -162,7 +162,7 @@ function MessageBubble({
 
   // Group reactions
   const reactionGroups: Record<string, { count: number; mine: boolean }> = {};
-  for (const r of msg.reactions) {
+  for (const r of (msg.reactions || [])) {
     if (!reactionGroups[r.emoji]) reactionGroups[r.emoji] = { count: 0, mine: false };
     reactionGroups[r.emoji].count++;
     if (r.userId === currentUserId) reactionGroups[r.emoji].mine = true;

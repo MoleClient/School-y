@@ -680,7 +680,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/conversations/everyone-public", async (_req, res) => {
     try {
       const conv = await storage.getOrCreateEveryoneConversation();
-      const messages = await storage.getConversationMessages(conv.id);
+      const msgs = await storage.getConversationMessages(conv.id);
+      // Attach reactions (same pattern as the authenticated route)
+      const allReactions: any[] = [];
+      for (const m of msgs) {
+        const rxns = await storage.getReactionsByMessage(m.id);
+        allReactions.push(...rxns);
+      }
+      const reactionsByMsg: Record<string, any[]> = {};
+      for (const r of allReactions) {
+        if (!reactionsByMsg[r.messageId]) reactionsByMsg[r.messageId] = [];
+        reactionsByMsg[r.messageId].push(r);
+      }
+      const messages = msgs.map(m => ({ ...m, reactions: reactionsByMsg[m.id] || [] }));
       res.json({ id: conv.id, name: conv.name, type: conv.type, messages });
     } catch {
       res.status(500).json({ error: "Failed to fetch everyone conversation" });
