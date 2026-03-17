@@ -14,6 +14,20 @@ import { baremuxPath } from "@mercuryworkshop/bare-mux/node";
 import { server as wisp, logging as wispLogging } from "@mercuryworkshop/wisp-js/server";
 import dns from "dns";
 import * as cheerio from 'cheerio';
+import { writeFileSync, mkdirSync } from "fs";
+import { join } from "path";
+
+// SSE clients for live chat broadcast
+const chatSseClients = new Set<any>();
+function broadcastChat(event: string, data: any) {
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const res of chatSseClients) {
+    try { res.write(payload); } catch {}
+  }
+}
+
+// Ensure uploads dir exists
+try { mkdirSync(join(process.cwd(), "public", "uploads"), { recursive: true }); } catch {}
 
 // Configure Puppeteer with stealth plugin to bypass bot detection
 puppeteer.use(StealthPlugin());
@@ -565,6 +579,153 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: "Failed to delete item" });
+    }
+  });
+
+  // ── Profile update ────────────────────────────────────────────────────────
+  app.patch("/api/user/profile", async (req: any, res) => {
+    const user = await getSessionUser(req);
+    if (!user) return res.status(401).json({ error: "Not logged in" });
+    const { displayName, avatarUrl, bio, socialTwitter, socialInstagram, socialDiscord } = req.body as any;
+    try {
+      const updated = await storage.updateUserProfile(user.id, { displayName, avatarUrl, bio, socialTwitter, socialInstagram, socialDiscord });
+      const { password: _, ...safe } = updated;
+      res.json(safe);
+    } catch {
+      res.status(500).json({ error: "Failed to update profile" });
+    }
+  });
+
+  // ── Image upload (base64 → file) ─────────────────────────────────────────
+  app.post("/api/upload", async (req: any, res) => {
+    const user = await getSessionUser(req);
+    if (!user) return res.status(401).json({ error: "Not logged in" });
+    const { dataUrl, filename } = req.body as any;
+    if (!dataUrl || !dataUrl.startsWith("data:image/")) return res.status(400).json({ error: "Invalid image" });
+    try {
+      const matches = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/);
+      if (!matches) return res.status(400).json({ error: "Invalid data URL" });
+      const ext = matches[1].replace("jpeg", "jpg");
+      const buffer = Buffer.from(matches[2], "base64");
+      if (buffer.length > 5 * 1024 * 1024) return res.status(400).json({ error: "Image too large (max 5MB)" });
+      const name = `${user.id}-${Date.now()}.${ext}`;
+      const uploadPath = join(process.cwd(), "public", "uploads", name);
+      writeFileSync(uploadPath, buffer);
+      res.json({ url: `/uploads/${name}` });
+    } catch {
+      res.status(500).json({ error: "Upload failed" });
+    }
+  });
+
+  // ── School Messages (Chat) ────────────────────────────────────────────────
+  // SSE endpoint for real-time chat updates
+  app.get("/api/messages/sse", (req, res) => {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+    res.write(": connected\n\n");
+    chatSseClients.add(res);
+    const keepAlive = setInterval(() => { try { res.write(": ping\n\n"); } catch {} }, 20000);
+    req.on("close", () => { chatSseClients.delete(res); clearInterval(keepAlive); });
+  });
+
+  // Get messages with reactions
+  app.get("/api/messages", async (req, res) => {
+    try {
+      const msgs = await storage.getChatMessages(100);
+      const messageIds = msgs.map(m => m.id);
+      const allReactions: any[] = [];
+      for (const id of messageIds) {
+        const rxns = await storage.getReactionsByMessage(id);
+        allReactions.push(...rxns);
+      }
+      const reactionsByMsg: Record<string, any[]> = {};
+      for (const r of allReactions) {
+        if (!reactionsByMsg[r.messageId]) reactionsByMsg[r.messageId] = [];
+        reactionsByMsg[r.messageId].push(r);
+      }
+      const result = msgs.map(m => ({ ...m, reactions: reactionsByMsg[m.id] || [] }));
+      res.json(result);
+    } catch {
+      res.status(500).json({ error: "Failed to fetch messages" });
+    }
+  });
+
+  // Post a message
+  app.post("/api/messages", async (req: any, res) => {
+    const user = await getSessionUser(req);
+    if (!user) return res.status(401).json({ error: "Not logged in" });
+    const { content, imageUrl, replyToId } = req.body as any;
+    if (!content?.trim() && !imageUrl) return res.status(400).json({ error: "Message cannot be empty" });
+    if (content && content.length > 2000) return res.status(400).json({ error: "Message too long" });
+    try {
+      const msg = await storage.createChatMessage({
+        userId: user.id,
+        content: content?.trim() || "",
+        imageUrl: imageUrl || null,
+        replyToId: replyToId || null,
+      });
+      const fullUser = { id: user.id, username: user.username, displayName: user.displayName, avatarUrl: user.avatarUrl };
+      const payload = { ...msg, user: fullUser, reactions: [] };
+      broadcastChat("message", payload);
+      res.json(payload);
+    } catch {
+      res.status(500).json({ error: "Failed to send message" });
+    }
+  });
+
+  // Edit a message
+  app.patch("/api/messages/:id", async (req: any, res) => {
+    const user = await getSessionUser(req);
+    if (!user) return res.status(401).json({ error: "Not logged in" });
+    const { content } = req.body as any;
+    if (!content?.trim()) return res.status(400).json({ error: "Content required" });
+    try {
+      const msg = await storage.editChatMessage(req.params.id, user.id, content.trim());
+      if (!msg) return res.status(404).json({ error: "Message not found or not yours" });
+      const fullUser = { id: user.id, username: user.username, displayName: user.displayName, avatarUrl: user.avatarUrl };
+      const payload = { ...msg, user: fullUser };
+      broadcastChat("message_edited", payload);
+      res.json(payload);
+    } catch {
+      res.status(500).json({ error: "Failed to edit message" });
+    }
+  });
+
+  // Delete a message
+  app.delete("/api/messages/:id", async (req: any, res) => {
+    const user = await getSessionUser(req);
+    if (!user) return res.status(401).json({ error: "Not logged in" });
+    try {
+      await storage.deleteChatMessage(req.params.id, user.id);
+      broadcastChat("message_deleted", { id: req.params.id });
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ error: "Failed to delete message" });
+    }
+  });
+
+  // Toggle reaction
+  app.post("/api/messages/:id/reactions", async (req: any, res) => {
+    const user = await getSessionUser(req);
+    if (!user) return res.status(401).json({ error: "Not logged in" });
+    const { emoji } = req.body as any;
+    if (!emoji) return res.status(400).json({ error: "emoji required" });
+    try {
+      const existing = await storage.getReactionsByMessage(req.params.id);
+      const mine = existing.find(r => r.userId === user.id && r.emoji === emoji);
+      if (mine) {
+        await storage.removeReaction(req.params.id, user.id, emoji);
+      } else {
+        await storage.addReaction(req.params.id, user.id, emoji);
+      }
+      const updated = await storage.getReactionsByMessage(req.params.id);
+      broadcastChat("reactions_updated", { messageId: req.params.id, reactions: updated });
+      res.json({ reactions: updated });
+    } catch {
+      res.status(500).json({ error: "Failed to toggle reaction" });
     }
   });
 
@@ -3635,6 +3796,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const path = await import('path');
   const customUvPath = path.join(process.cwd(), 'client/public/uv');
   const publicPath = path.join(process.cwd(), 'client/public');
+
+  // Serve uploaded files (avatars, chat images)
+  app.use("/uploads/", express.static(path.join(process.cwd(), 'public', 'uploads')));
   
   // Serve the wrapper service worker with Service-Worker-Allowed header
   app.get("/sw.js", (req, res, next) => {

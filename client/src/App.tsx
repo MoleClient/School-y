@@ -7,12 +7,14 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import Browser from "@/pages/browser";
 import About from "@/pages/about";
 import ProfilePage from "@/pages/profile";
+import MessagesPage from "@/pages/messages";
 
 function Router() {
   return (
     <Switch>
       <Route path="/about" component={About} />
       <Route path="/profile" component={ProfilePage} />
+      <Route path="/messages" component={MessagesPage} />
       <Route path="/" component={Browser} />
       <Route path="/search" component={Browser} />
       <Route component={Browser} />

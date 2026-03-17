@@ -7,6 +7,12 @@ export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
+  displayName: text("display_name"),
+  avatarUrl: text("avatar_url"),
+  bio: text("bio"),
+  socialTwitter: text("social_twitter"),
+  socialInstagram: text("social_instagram"),
+  socialDiscord: text("social_discord"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -59,6 +65,38 @@ export const insertHistoryItemSchema = createInsertSchema(historyItems).omit({
 
 export type InsertHistoryItem = z.infer<typeof insertHistoryItemSchema>;
 export type HistoryItem = typeof historyItems.$inferSelect;
+
+// School Messages
+export const chatMessages = pgTable("chat_messages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  content: text("content").notNull(),
+  imageUrl: text("image_url"),
+  replyToId: varchar("reply_to_id"),
+  editedAt: timestamp("edited_at"),
+  originalContent: text("original_content"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertChatMessageSchema = createInsertSchema(chatMessages).omit({
+  id: true,
+  editedAt: true,
+  originalContent: true,
+  createdAt: true,
+});
+
+export type InsertChatMessage = z.infer<typeof insertChatMessageSchema>;
+export type ChatMessage = typeof chatMessages.$inferSelect;
+
+export const messageReactions = pgTable("message_reactions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  messageId: varchar("message_id").notNull().references(() => chatMessages.id),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  emoji: text("emoji").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type MessageReaction = typeof messageReactions.$inferSelect;
 
 export const searchResultSchema = z.object({
   title: z.string(),

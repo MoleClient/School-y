@@ -8,11 +8,14 @@ A web browser platform designed to look like Google's homepage, featuring a clea
 - **Real Search Results**: Google-style search results layout with favicons, blue titles, green URLs, and descriptions
 - **Beta AI Overview**: AI-powered search summary panel (requires API key + model name configuration)
 - **Embedded Webpage Viewer**: View websites without redirecting using advanced iframe + proxy technology
-- **No Authentication**: Direct access with no password block
 - **URL Obfuscation**: Domain names are XOR-encoded and base64-encoded to evade content filter detection
 - **YouTube Playback**: Embedded YouTube IFrame player injected when visiting YouTube watch pages through the proxy
 - **Real-time Support**: WebSocket tunneling and SSE proxy for chat apps, live updates, and streaming content
 - **Remote Browser**: Puppeteer-based fallback for complex SPAs (ChatGPT, Claude, Discord, etc.)
+- **User Accounts**: Username+password authentication, stored in PostgreSQL with session cookies
+- **User Profiles**: Upload avatar photo, set display name, bio, connect Twitter/Instagram/Discord
+- **Browsing History**: Per-user history saved to DB, visible on profile page
+- **School Messages**: Live group chat (SSE-powered), emoji reactions, replies, image attachments, message editing with original visible on click. Beta feature visible to all, sending requires login.
 
 ## Design Theme
 

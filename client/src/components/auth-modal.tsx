@@ -1,26 +1,31 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2 } from "lucide-react";
+import { Loader2, MessageSquare, Globe } from "lucide-react";
+import { SchoolyLogo } from "@/components/schooly-logo";
 
 interface AuthModalProps {
   open: boolean;
   onClose: () => void;
+  initialMode?: "login" | "register";
 }
 
-export function AuthModal({ open, onClose }: AuthModalProps) {
+export function AuthModal({ open, onClose, initialMode = "login" }: AuthModalProps) {
   const { login, register } = useAuth();
-  const [mode, setMode] = useState<"login" | "register">("login");
+  const [mode, setMode] = useState<"login" | "register">(initialMode);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const reset = () => { setUsername(""); setPassword(""); setError(""); };
+  useEffect(() => {
+    if (open) setMode(initialMode);
+  }, [open, initialMode]);
 
+  const reset = () => { setUsername(""); setPassword(""); setError(""); };
   const switchMode = (m: "login" | "register") => { setMode(m); reset(); };
 
   const submit = async (e: React.FormEvent) => {
@@ -46,12 +51,33 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle className="text-center">
-            {mode === "login" ? "Sign in to Schooly" : "Create a Schooly account"}
+          <div className="flex justify-center mb-2">
+            <SchoolyLogo size="small" />
+          </div>
+          <DialogTitle className="text-center text-base">
+            {mode === "login" ? "Welcome back" : "Join Schooly"}
           </DialogTitle>
+          {mode === "register" && (
+            <p className="text-center text-xs text-muted-foreground mt-1">
+              Create an account to save history, chat in School Messages, and more
+            </p>
+          )}
         </DialogHeader>
 
-        <form onSubmit={submit} className="flex flex-col gap-4 mt-2">
+        {mode === "register" && (
+          <div className="flex gap-3 mb-2 mt-1">
+            <div className="flex-1 bg-muted/50 rounded-lg p-2.5 flex flex-col items-center gap-1">
+              <Globe className="w-4 h-4 text-[#4285F4]" />
+              <span className="text-[10px] text-muted-foreground text-center">Save history</span>
+            </div>
+            <div className="flex-1 bg-muted/50 rounded-lg p-2.5 flex flex-col items-center gap-1">
+              <MessageSquare className="w-4 h-4 text-[#34A853]" />
+              <span className="text-[10px] text-muted-foreground text-center">Live chat</span>
+            </div>
+          </div>
+        )}
+
+        <form onSubmit={submit} className="flex flex-col gap-3 mt-1">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="username">Username</Label>
             <Input
@@ -63,6 +89,7 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
               onChange={(e) => setUsername(e.target.value)}
               disabled={loading}
               maxLength={20}
+              autoFocus
             />
           </div>
 
@@ -99,7 +126,7 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
                   type="button"
                   data-testid="button-switch-register"
                   onClick={() => switchMode("register")}
-                  className="text-blue-600 hover:underline"
+                  className="text-[#4285F4] hover:underline"
                 >
                   Sign up
                 </button>
@@ -111,7 +138,7 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
                   type="button"
                   data-testid="button-switch-login"
                   onClick={() => switchMode("login")}
-                  className="text-blue-600 hover:underline"
+                  className="text-[#4285F4] hover:underline"
                 >
                   Sign in
                 </button>

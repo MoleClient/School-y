@@ -3,7 +3,9 @@ import {
   type HistoryItem, type InsertHistoryItem,
   type BrowserHistory, type InsertBrowserHistory,
   type UserSession,
-  users, userSessions, browserHistory, historyItems,
+  type ChatMessage, type InsertChatMessage,
+  type MessageReaction,
+  users, userSessions, browserHistory, historyItems, chatMessages, messageReactions,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, gt } from "drizzle-orm";
@@ -15,6 +17,7 @@ export interface IStorage {
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   verifyPassword(plain: string, hash: string): Promise<boolean>;
+  updateUserProfile(id: string, data: Partial<Pick<User, "displayName" | "avatarUrl" | "bio" | "socialTwitter" | "socialInstagram" | "socialDiscord">>): Promise<User>;
 
   createSession(userId: string): Promise<UserSession>;
   getSession(token: string): Promise<(UserSession & { user: User }) | undefined>;
@@ -28,6 +31,18 @@ export interface IStorage {
 
   addHistoryItem(item: InsertHistoryItem): Promise<HistoryItem>;
   getHistory(limit?: number): Promise<HistoryItem[]>;
+
+  // Chat messages
+  getChatMessages(limit?: number): Promise<(ChatMessage & { user: Pick<User, "id" | "username" | "displayName" | "avatarUrl"> })[]>;
+  createChatMessage(msg: InsertChatMessage): Promise<ChatMessage>;
+  editChatMessage(id: string, userId: string, newContent: string): Promise<ChatMessage | undefined>;
+  deleteChatMessage(id: string, userId: string): Promise<void>;
+  getChatMessage(id: string): Promise<ChatMessage | undefined>;
+
+  // Reactions
+  getReactionsByMessage(messageId: string): Promise<MessageReaction[]>;
+  addReaction(messageId: string, userId: string, emoji: string): Promise<MessageReaction>;
+  removeReaction(messageId: string, userId: string, emoji: string): Promise<void>;
 
   isIpAuthenticated(ip: string): boolean;
   authenticateIp(ip: string): void;
@@ -68,6 +83,11 @@ class DatabaseStorage implements IStorage {
 
   async verifyPassword(plain: string, hash: string): Promise<boolean> {
     return bcrypt.compare(plain, hash);
+  }
+
+  async updateUserProfile(id: string, data: Partial<Pick<User, "displayName" | "avatarUrl" | "bio" | "socialTwitter" | "socialInstagram" | "socialDiscord">>): Promise<User> {
+    const result = await db.update(users).set(data).where(eq(users.id, id)).returning();
+    return result[0];
   }
 
   async createSession(userId: string): Promise<UserSession> {
@@ -134,6 +154,77 @@ class DatabaseStorage implements IStorage {
 
   async getHistory(limit: number = 50): Promise<HistoryItem[]> {
     return db.select().from(historyItems).orderBy(desc(historyItems.visitedAt)).limit(limit);
+  }
+
+  async getChatMessages(limit: number = 100): Promise<(ChatMessage & { user: Pick<User, "id" | "username" | "displayName" | "avatarUrl"> })[]> {
+    const rows = await db
+      .select({
+        id: chatMessages.id,
+        userId: chatMessages.userId,
+        content: chatMessages.content,
+        imageUrl: chatMessages.imageUrl,
+        replyToId: chatMessages.replyToId,
+        editedAt: chatMessages.editedAt,
+        originalContent: chatMessages.originalContent,
+        createdAt: chatMessages.createdAt,
+        user: {
+          id: users.id,
+          username: users.username,
+          displayName: users.displayName,
+          avatarUrl: users.avatarUrl,
+        },
+      })
+      .from(chatMessages)
+      .innerJoin(users, eq(chatMessages.userId, users.id))
+      .orderBy(desc(chatMessages.createdAt))
+      .limit(limit);
+    return rows.reverse();
+  }
+
+  async createChatMessage(msg: InsertChatMessage): Promise<ChatMessage> {
+    const result = await db.insert(chatMessages).values(msg).returning();
+    return result[0];
+  }
+
+  async editChatMessage(id: string, userId: string, newContent: string): Promise<ChatMessage | undefined> {
+    const existing = await db.select().from(chatMessages).where(and(eq(chatMessages.id, id), eq(chatMessages.userId, userId))).limit(1);
+    if (!existing[0]) return undefined;
+    const original = existing[0].originalContent || existing[0].content;
+    const result = await db
+      .update(chatMessages)
+      .set({ content: newContent, editedAt: new Date(), originalContent: original })
+      .where(and(eq(chatMessages.id, id), eq(chatMessages.userId, userId)))
+      .returning();
+    return result[0];
+  }
+
+  async deleteChatMessage(id: string, userId: string): Promise<void> {
+    await db.delete(messageReactions).where(eq(messageReactions.messageId, id));
+    await db.delete(chatMessages).where(and(eq(chatMessages.id, id), eq(chatMessages.userId, userId)));
+  }
+
+  async getChatMessage(id: string): Promise<ChatMessage | undefined> {
+    const result = await db.select().from(chatMessages).where(eq(chatMessages.id, id)).limit(1);
+    return result[0];
+  }
+
+  async getReactionsByMessage(messageId: string): Promise<MessageReaction[]> {
+    return db.select().from(messageReactions).where(eq(messageReactions.messageId, messageId));
+  }
+
+  async addReaction(messageId: string, userId: string, emoji: string): Promise<MessageReaction> {
+    const existing = await db.select().from(messageReactions).where(
+      and(eq(messageReactions.messageId, messageId), eq(messageReactions.userId, userId), eq(messageReactions.emoji, emoji))
+    ).limit(1);
+    if (existing[0]) return existing[0];
+    const result = await db.insert(messageReactions).values({ messageId, userId, emoji }).returning();
+    return result[0];
+  }
+
+  async removeReaction(messageId: string, userId: string, emoji: string): Promise<void> {
+    await db.delete(messageReactions).where(
+      and(eq(messageReactions.messageId, messageId), eq(messageReactions.userId, userId), eq(messageReactions.emoji, emoji))
+    );
   }
 }
 

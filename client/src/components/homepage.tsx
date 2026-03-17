@@ -1,9 +1,12 @@
 import { useState, useRef, useEffect, KeyboardEvent } from "react";
-import { Search, X } from "lucide-react";
+import { Search, X, MessageSquare } from "lucide-react";
 import { SchoolyLogo } from "./schooly-logo";
 import { LuckyWheel } from "./lucky-wheel";
 import { SpringScene } from "./spring-scene";
+import { AccountMenu } from "./account-menu";
+import { AuthModal } from "./auth-modal";
 import { useLocation } from "wouter";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface HomepageProps {
   onSearch: (query: string) => void;
@@ -48,7 +51,6 @@ function StorePopup({ onClose }: { onClose: () => void }) {
             onClick={onClose}
             className="px-6 py-2 text-sm rounded-full text-white"
             style={{ background: "linear-gradient(135deg, #4285F4, #6B72CF)" }}
-            data-testid="button-store-ok"
           >
             Got it
           </button>
@@ -59,25 +61,38 @@ function StorePopup({ onClose }: { onClose: () => void }) {
 }
 
 export function Homepage({ onSearch, onNavigate }: HomepageProps) {
+  const { user } = useAuth();
   const [searchValue, setSearchValue] = useState("");
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedIdx, setSelectedIdx] = useState(-1);
   const [showWheel, setShowWheel] = useState(false);
   const [showStore, setShowStore] = useState(false);
+  const [showAuth, setShowAuth] = useState(false);
+  const [authMode, setAuthMode] = useState<"login" | "register">("register");
+  const [pendingSearch, setPendingSearch] = useState<string | null>(null);
   const suggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [, setLocation] = useLocation();
 
+  // When auth modal closes and user is now logged in + there's a pending search, execute it
+  useEffect(() => {
+    if (!showAuth && pendingSearch && user) {
+      const q = pendingSearch;
+      setPendingSearch(null);
+      const urlPattern = /^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$/;
+      if (urlPattern.test(q)) {
+        onNavigate(q.startsWith("http") ? q : `https://${q}`);
+      } else {
+        onSearch(q);
+      }
+    }
+  }, [showAuth, pendingSearch, user]);
+
   const navigate = (value: string) => {
     const trimmed = value.trim();
     if (!trimmed) return;
-    const urlPattern = /^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$/;
-    if (urlPattern.test(trimmed)) {
-      onNavigate(trimmed.startsWith("http") ? trimmed : `https://${trimmed}`);
-    } else {
-      onSearch(trimmed);
-    }
+    onSearch(trimmed);
   };
 
   const handleChange = (value: string) => {
@@ -100,25 +115,31 @@ export function Homepage({ onSearch, onNavigate }: HomepageProps) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
         setSelectedIdx(i => Math.min(i + 1, suggestions.length - 1));
-        return;
-      }
-      if (e.key === "ArrowUp") {
+      } else if (e.key === "ArrowUp") {
         e.preventDefault();
         setSelectedIdx(i => Math.max(i - 1, -1));
-        return;
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        if (selectedIdx >= 0) {
+          pickSuggestion(suggestions[selectedIdx]);
+        } else {
+          setShowSuggestions(false);
+          navigate(searchValue);
+        }
+      } else if (e.key === "Escape") {
+        setShowSuggestions(false);
+        setSelectedIdx(-1);
       }
-      if (e.key === "Escape") { setShowSuggestions(false); setSelectedIdx(-1); return; }
-    }
-    if (e.key === "Enter") {
-      const val = selectedIdx >= 0 ? suggestions[selectedIdx] : searchValue;
-      setShowSuggestions(false);
-      navigate(val);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      navigate(searchValue);
     }
   };
 
   const pickSuggestion = (s: string) => {
     setSearchValue(s);
     setShowSuggestions(false);
+    setSelectedIdx(-1);
     navigate(s);
   };
 
@@ -126,6 +147,7 @@ export function Homepage({ onSearch, onNavigate }: HomepageProps) {
     const handler = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setShowSuggestions(false);
+        setSelectedIdx(-1);
       }
     };
     document.addEventListener("mousedown", handler);
@@ -138,8 +160,9 @@ export function Homepage({ onSearch, onNavigate }: HomepageProps) {
     <div className="h-full flex flex-col bg-background">
       {showWheel && <LuckyWheel onClose={() => setShowWheel(false)} />}
       {showStore && <StorePopup onClose={() => setShowStore(false)} />}
+      <AuthModal open={showAuth} onClose={() => setShowAuth(false)} initialMode={authMode} />
 
-      <header className="flex items-center justify-end gap-4 px-4 py-2">
+      <header className="flex items-center justify-end gap-3 px-4 py-2">
         <button
           onClick={() => setLocation("/about")}
           className="text-[13px] text-foreground/80 hover:underline bg-transparent border-none"
@@ -154,6 +177,17 @@ export function Homepage({ onSearch, onNavigate }: HomepageProps) {
         >
           Store
         </button>
+        {/* School Messages with NEW badge */}
+        <button
+          onClick={() => setLocation("/messages")}
+          className="flex items-center gap-1.5 text-[13px] text-[#4285F4] hover:underline bg-transparent border-none font-medium"
+          data-testid="button-messages"
+        >
+          <MessageSquare className="w-3.5 h-3.5" />
+          <span>Messages</span>
+          <span className="px-1 py-px text-[9px] font-bold bg-[#EA4335] text-white rounded-full uppercase tracking-wide leading-none">NEW</span>
+        </button>
+        <AccountMenu />
       </header>
 
       <div className="flex-1 flex flex-col">
@@ -215,6 +249,28 @@ export function Homepage({ onSearch, onNavigate }: HomepageProps) {
                 I'm Feeling Lucky
               </button>
             </div>
+
+            {/* Sign-in nudge for non-logged-in users */}
+            {!user && (
+              <div className="mt-5 text-center text-[12px] text-muted-foreground">
+                <button
+                  onClick={() => { setAuthMode("register"); setShowAuth(true); }}
+                  className="text-[#4285F4] hover:underline"
+                  data-testid="button-join-schooly"
+                >
+                  Join Schooly
+                </button>
+                {" to save your history & chat"}
+                {" · "}
+                <button
+                  onClick={() => { setAuthMode("login"); setShowAuth(true); }}
+                  className="text-[#4285F4] hover:underline"
+                  data-testid="button-sign-in-nudge"
+                >
+                  Sign in
+                </button>
+              </div>
+            )}
           </div>
         </div>
 

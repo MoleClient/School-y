@@ -1,9 +1,15 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { queryClient } from "@/lib/queryClient";
 
 export interface AuthUser {
   id: string;
   username: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  bio: string | null;
+  socialTwitter: string | null;
+  socialInstagram: string | null;
+  socialDiscord: string | null;
   createdAt: string;
 }
 
@@ -13,6 +19,8 @@ interface AuthContextValue {
   login: (username: string, password: string) => Promise<void>;
   register: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  refreshUser: () => Promise<void>;
+  updateUser: (data: Partial<AuthUser>) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -21,13 +29,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const fetchMe = async () => {
+    try {
+      const r = await fetch("/api/auth/me", { credentials: "include" });
+      if (r.ok) {
+        const u = await r.json();
+        setUser(u);
+      } else {
+        setUser(null);
+      }
+    } catch {
+      setUser(null);
+    }
+  };
+
   useEffect(() => {
-    fetch("/api/auth/me", { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((u) => setUser(u))
-      .catch(() => setUser(null))
-      .finally(() => setLoading(false));
+    fetchMe().finally(() => setLoading(false));
   }, []);
+
+  const refreshUser = async () => {
+    await fetchMe();
+  };
+
+  const updateUser = (data: Partial<AuthUser>) => {
+    setUser(prev => prev ? { ...prev, ...data } : prev);
+  };
 
   const login = async (username: string, password: string) => {
     const res = await fetch("/api/auth/login", {
@@ -62,7 +88,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, refreshUser, updateUser }}>
       {children}
     </AuthContext.Provider>
   );
