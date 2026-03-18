@@ -543,6 +543,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (existing) return res.status(409).json({ error: "Username already taken" });
 
       if (BANNED_USERNAMES.has(username.toLowerCase())) return res.status(400).json({ error: "That username is not allowed on School-y." });
+      if (/zach/i.test(username)) return res.status(400).json({ error: "That username is not allowed on School-y." });
 
       const nameCheck = await moderateName(username, "username");
       if (!nameCheck.safe) return res.status(400).json({ error: "That username is not allowed on School-y." });
