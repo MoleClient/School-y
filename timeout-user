@@ -1,0 +1,3 @@
+#!/bin/bash
+# Convenience wrapper — run as: ./timeout-user <username> <minutes>
+node "$(dirname "$0")/scripts/timeout-user.mjs" "$@"

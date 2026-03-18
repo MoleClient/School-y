@@ -449,13 +449,20 @@ function cleanCache() {
 const OPENROUTER_MODEL = "openai/gpt-4o";
 
 // Middleware: extract user from session cookie
-async function getSessionUser(req: any): Promise<{ id: string; username: string; createdAt: Date } | null> {
+async function getSessionUser(req: any): Promise<{ id: string; username: string; displayName?: string | null; avatarUrl?: string | null; createdAt: Date; timedOutUntil?: Date | null } | null> {
   const token = req.cookies?.schooly_session;
   if (!token) return null;
   try {
     const session = await storage.getSession(token);
     if (!session) return null;
-    return { id: session.user.id, username: session.user.username, createdAt: session.user.createdAt };
+    return {
+      id: session.user.id,
+      username: session.user.username,
+      displayName: session.user.displayName,
+      avatarUrl: session.user.avatarUrl,
+      createdAt: session.user.createdAt,
+      timedOutUntil: session.user.timedOutUntil,
+    };
   } catch {
     return null;
   }
@@ -877,6 +884,9 @@ Respond ONLY with valid JSON: {"safe":true} or {"safe":false}. Nothing else.`,
   app.post("/api/conversations/:id/messages", async (req: any, res) => {
     const user = await getSessionUser(req);
     if (!user) return res.status(401).json({ error: "Not logged in" });
+    if (user.timedOutUntil && new Date(user.timedOutUntil) > new Date()) {
+      return res.status(403).json({ error: "timed_out", timedOutUntil: user.timedOutUntil });
+    }
     const convId = req.params.id;
     const { content, imageUrl, replyToId } = req.body as any;
     if (!content?.trim() && !imageUrl) return res.status(400).json({ error: "Message cannot be empty" });

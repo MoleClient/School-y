@@ -11,6 +11,7 @@ export interface AuthUser {
   socialInstagram: string | null;
   socialDiscord: string | null;
   createdAt: string;
+  timedOutUntil: string | null;
 }
 
 interface AuthContextValue {

@@ -14,6 +14,7 @@ export const users = pgTable("users", {
   socialInstagram: text("social_instagram"),
   socialDiscord: text("social_discord"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  timedOutUntil: timestamp("timed_out_until"),
 });
 
 export const insertUserSchema = createInsertSchema(users).pick({

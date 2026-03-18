@@ -392,12 +392,14 @@ function TypingIndicator({ users }: { users: { username: string; displayName?: s
 // ─── MessageInput ─────────────────────────────────────────────────────────────
 
 function MessageInput({
-  onSend, replyTo, onCancelReply, disabled, convId,
+  onSend, replyTo, onCancelReply, disabled, timedOut, timedOutUntil, convId,
 }: {
   onSend: (text: string, imageUrl?: string | null) => void;
   replyTo: Message | null;
   onCancelReply: () => void;
   disabled?: boolean;
+  timedOut?: boolean;
+  timedOutUntil?: Date | null;
   convId?: string;
 }) {
   const [text, setText] = useState("");
@@ -468,10 +470,32 @@ function MessageInput({
     reader.readAsDataURL(file);
   };
 
+  // Timeout countdown label
+  const timeoutLabel = (() => {
+    if (!timedOut || !timedOutUntil) return null;
+    const secs = Math.max(0, Math.floor((timedOutUntil.getTime() - Date.now()) / 1000));
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return m > 0 ? `${m}m ${s}s` : `${s}s`;
+  })();
+
+  const inputDisabled = !!(disabled || timedOut);
+
   return (
     <div className="border-t border-[#E5E5EA] bg-white px-3 py-2">
+      {/* Timeout banner */}
+      {timedOut && (
+        <div className="flex items-center gap-2 px-3 py-2 mb-2 bg-[#FFF3CD] border border-[#FFCA28] rounded-[14px]">
+          <Lock className="h-3.5 w-3.5 text-[#B45309] flex-shrink-0" />
+          <p className="text-[12px] font-medium text-[#B45309] flex-1">
+            You are timed out
+            {timeoutLabel && <span className="font-normal text-[#92400E]"> — {timeoutLabel} remaining</span>}
+          </p>
+        </div>
+      )}
+
       {/* Reply preview */}
-      {replyTo && (
+      {replyTo && !timedOut && (
         <div className="flex items-center justify-between px-3 py-2 mb-2 bg-[#F2F2F7] rounded-[14px]">
           <div className="flex-1 min-w-0">
             <span className="text-[11px] font-semibold text-[#007AFF]">
@@ -486,7 +510,7 @@ function MessageInput({
       )}
 
       {/* Image preview */}
-      {imageUrl && (
+      {imageUrl && !timedOut && (
         <div className="relative mb-2 w-fit">
           <img src={imageUrl} className="rounded-[14px] max-h-24 max-w-[200px] object-cover" />
           <button onClick={() => setImageUrl(null)}
@@ -497,26 +521,34 @@ function MessageInput({
       )}
 
       <div className="flex items-end gap-2">
-        <button onClick={() => fileRef.current?.click()} disabled={uploading}
-          className="p-2 text-[#007AFF] hover:bg-[#F2F2F7] rounded-full transition-colors flex-shrink-0">
+        <button onClick={() => fileRef.current?.click()} disabled={inputDisabled || uploading}
+          className={`p-2 rounded-full transition-colors flex-shrink-0 ${inputDisabled ? "text-[#C7C7CC] cursor-not-allowed" : "text-[#007AFF] hover:bg-[#F2F2F7]"}`}>
           {uploading ? <div className="h-5 w-5 border-2 border-[#007AFF] border-t-transparent rounded-full animate-spin" /> : <ImageIcon className="h-5 w-5" />}
         </button>
         <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleImage} />
 
-        <div className={`flex-1 flex items-end bg-white border rounded-[22px] px-3 py-1.5 transition-all duration-200 ${
-          focused ? "border-[#007AFF] shadow-[0_0_0_3px_rgba(0,122,255,0.12)]" : "border-[#C7C7CC]"
+        <div className={`flex-1 flex items-end border rounded-[22px] px-3 py-1.5 transition-all duration-200 ${
+          timedOut
+            ? "bg-[#F2F2F7] border-[#E5E5EA] cursor-not-allowed"
+            : focused
+              ? "bg-white border-[#007AFF] shadow-[0_0_0_3px_rgba(0,122,255,0.12)]"
+              : "bg-white border-[#C7C7CC]"
         }`}>
           <textarea
             ref={textRef}
-            value={text}
+            value={timedOut ? "" : text}
             onChange={e => handleTextChange(e.target.value)}
             onKeyDown={handleKeyDown}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
-            placeholder={disabled ? "Sign in to message..." : "School-y Text"}
-            disabled={disabled}
+            placeholder={
+              timedOut ? "You are timed out..." :
+              disabled ? "Sign in to message..." :
+              "School-y Text"
+            }
+            disabled={inputDisabled}
             rows={1}
-            className="flex-1 bg-transparent text-[15px] text-[#1C1C1E] placeholder-[#8E8E93] outline-none resize-none max-h-28 leading-[1.4] py-0.5"
+            className={`flex-1 bg-transparent text-[15px] placeholder-[#8E8E93] outline-none resize-none max-h-28 leading-[1.4] py-0.5 ${timedOut ? "text-[#C7C7CC] cursor-not-allowed" : "text-[#1C1C1E]"}`}
             style={{ fieldSizing: "content" } as React.CSSProperties}
           />
         </div>
@@ -773,9 +805,30 @@ function ConversationThread({ conv, currentUser, onBack, readOnly }: {
   const [showInfo, setShowInfo] = useState(false);
   const [addingMember, setAddingMember] = useState(false);
   const [typingUsers, setTypingUsers] = useState<Map<string, { username: string; displayName?: string | null; avatarUrl?: string | null }>>(new Map());
+  const [now, setNow] = useState(() => new Date());
   const newMsgIds = useRef<Set<string>>(new Set());
   const bottomRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+  const { user: authUser, refreshUser } = useAuth();
+
+  const timedOutUntil = authUser?.timedOutUntil ? new Date(authUser.timedOutUntil) : null;
+  const isTimedOut = timedOutUntil != null && timedOutUntil > now;
+
+  // Tick every second while timed out to update countdown
+  useEffect(() => {
+    if (!isTimedOut) return;
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, [isTimedOut]);
+
+  // Refresh user once timeout expires
+  useEffect(() => {
+    if (!timedOutUntil) return;
+    const ms = timedOutUntil.getTime() - Date.now();
+    if (ms <= 0) return;
+    const id = setTimeout(() => refreshUser(), ms + 200);
+    return () => clearTimeout(id);
+  }, [authUser?.timedOutUntil]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     bottomRef.current?.scrollIntoView({ behavior, block: "end" });
@@ -1055,6 +1108,8 @@ function ConversationThread({ conv, currentUser, onBack, readOnly }: {
           replyTo={replyTo}
           onCancelReply={() => setReplyTo(null)}
           disabled={!currentUser}
+          timedOut={isTimedOut}
+          timedOutUntil={timedOutUntil}
           convId={conv.id}
         />
       )}
