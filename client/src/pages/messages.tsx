@@ -1090,12 +1090,19 @@ function ConversationThread({ conv, currentUser, onBack, readOnly }: {
       </div>
 
       {/* Input or read-only banner */}
-      {readOnly ? (
+      {conv.type === "everyone" ? (
+        <div className="border-t border-[#E5E5EA] bg-[#F2F2F7] px-4 py-3 flex items-center gap-2">
+          <Lock className="h-4 w-4 text-[#8E8E93] flex-shrink-0" />
+          <p className="text-[12px] font-semibold text-[#8E8E93] uppercase tracking-wide">
+            Everyone chat is temporarily down. Group chats and DMs still available.
+          </p>
+        </div>
+      ) : readOnly ? (
         <div className="border-t border-[#E5E5EA] bg-[#F2F2F7] px-4 py-3 flex items-center gap-3">
           <Lock className="h-4 w-4 text-[#8E8E93] flex-shrink-0" />
           <p className="text-[13px] text-[#8E8E93] flex-1">Sign in to join the conversation</p>
           <button
-            onClick={() => { /* will be handled by parent */ document.dispatchEvent(new CustomEvent("schooly:openauth")); }}
+            onClick={() => { document.dispatchEvent(new CustomEvent("schooly:openauth")); }}
             className="text-[13px] font-semibold text-[#007AFF]"
           >
             Sign In
