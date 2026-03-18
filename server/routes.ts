@@ -484,6 +484,47 @@ const BANNED_USERNAMES = new Set([
   "cummingson",
 ]);
 
+// ── Hardcoded slur blocklist (instant sync check, no AI needed) ───────────────
+const SLUR_PATTERN = /\b(n+i+g+[aeu]+r*s*|n+i+g+a+s*|niga+s*|nigg[aeu]+r*s*|chink+s*|sp[i]+c+s*|k[yi]+k+e+s*|f+[a4@]+g+[osg]*|f+[a4@]+gg*[oie]+t+s*|reta+rd+s*|tr[a4@]+nn[yi]+e*s*|c[o0]+[o0]+n+s*|j[i1]+gg?[a4@]+b[o0]+[o0]*s*|w[e3]tb[a4@]+c+k+s*|b[e3][a4@]+n[e3]r+s*|g[o0]+[o0]+k+s*|sand\s*n+[i1]+gg*[a4@]r*s*|towel\s*h[e3][a4@]d+s*|c[a4@]m+[e3]l\s*j[o0]c+k+[e3]*y*s*|p+[a4@]+k[i1]+s*|h[i1]+tl+[e3]r+|n+[a4@]+z+[i1]+s*|h[e3][i1]l+\s*h[i1]+tl*[e3]+r*|[a4@]+r+y[a4@]+n+s*|wh[i1]+t[e3]\s*p[o0]w[e3]r+|k+[k1]+k+|s+k+[i1]+n+h[e3]+[a4@]+d+s*)\b/i;
+
+// ── Synchronous AI content screen (for everyone chat, before save) ─────────────
+async function screenMessageContent(text: string): Promise<{ blocked: boolean; reason?: string }> {
+  if (!process.env.OPENROUTER_API_KEY) return { blocked: false };
+  try {
+    const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://school-y.replit.app",
+        "X-Title": "School-y Chat Screen",
+      },
+      body: JSON.stringify({
+        model: "openai/gpt-4o-mini",
+        messages: [{
+          role: "user",
+          content: `You are a strict content moderator for a school-age chat platform. Does this message contain ANY of the following: racial slurs, ethnic slurs, hate speech, words used as racial/ethnic insults (including "monkey", "ape", "boy", "thug" used in clearly racist context), sexual content, graphic violence, nazi/extremist references, or anything deeply offensive or harmful to students?
+
+Message: "${text}"
+
+Be aggressive — if there is any reasonable chance the word is being used as a slur or hate speech, flag it.
+Respond ONLY with valid JSON: {"blocked":false} or {"blocked":true}. Nothing else.`,
+        }],
+        max_tokens: 10,
+        temperature: 0,
+      }),
+    });
+    if (!resp.ok) return { blocked: false };
+    const data: any = await resp.json();
+    const raw = data.choices?.[0]?.message?.content?.trim();
+    if (!raw) return { blocked: false };
+    const result = JSON.parse(raw);
+    return { blocked: !!result.blocked };
+  } catch {
+    return { blocked: false };
+  }
+}
+
 // ── AI name moderation ────────────────────────────────────────────────────────
 async function moderateName(text: string, kind: "username" | "display name"): Promise<{ safe: boolean; reason?: string }> {
   if (!process.env.OPENROUTER_API_KEY) return { safe: true };
@@ -981,7 +1022,7 @@ Respond ONLY with valid JSON: {"safe":true} or {"safe":false}. Nothing else.`,
       const isMember = await storage.isConversationMember(convId, user.id);
       if (!isMember) return res.status(403).json({ error: "Not a member" });
 
-      // Slowmode enforcement for everyone chat
+      // Slowmode + content screening for everyone chat
       const convInfo2 = await storage.getConversationById(convId);
       if (convInfo2?.type === "everyone") {
         const lastSent = everyoneSlowmodeMap.get(user.id) ?? 0;
@@ -990,6 +1031,20 @@ Respond ONLY with valid JSON: {"safe":true} or {"safe":false}. Nothing else.`,
           const retryAfter = Math.ceil((EVERYONE_SLOWMODE_MS - elapsed) / 1000);
           return res.status(429).json({ error: "slow_mode", retryAfter });
         }
+
+        // 1. Instant hardcoded slur check
+        if (content?.trim() && SLUR_PATTERN.test(content.trim())) {
+          return res.status(400).json({ error: "That message isn't allowed on School-y." });
+        }
+
+        // 2. Synchronous AI screen before saving
+        if (content?.trim()) {
+          const screen = await screenMessageContent(content.trim());
+          if (screen.blocked) {
+            return res.status(400).json({ error: "That message isn't allowed on School-y." });
+          }
+        }
+
         everyoneSlowmodeMap.set(user.id, Date.now());
       }
 

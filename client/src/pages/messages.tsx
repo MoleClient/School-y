@@ -934,6 +934,11 @@ function ConversationThread({ conv, currentUser, onBack, readOnly, onUpdate }: {
       const res = await apiRequest("POST", `/api/conversations/${conv.id}/messages`, {
         content, imageUrl: imageUrl || null, replyToId: replyTo?.id || null,
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast({ title: err.error || "Failed to send", variant: "destructive" });
+        return;
+      }
       const msg: Message = await res.json();
       setMessages(prev => prev.find(m => m.id === msg.id) ? prev : [...prev, msg]);
       setReplyTo(null);
