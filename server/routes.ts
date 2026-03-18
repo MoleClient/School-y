@@ -468,6 +468,19 @@ async function getSessionUser(req: any): Promise<{ id: string; username: string;
   }
 }
 
+// ── Permanently banned usernames (lowercase, exact match) ─────────────────────
+const BANNED_USERNAMES = new Set([
+  "zachary_golinger",
+  "zacharygolinger",
+  "dihsucker",
+  "adolf",
+  "adiholf",
+  "mustacheman",
+  "nigger",
+  "igoonto67kid",
+  "hitler",
+]);
+
 // ── AI name moderation ────────────────────────────────────────────────────────
 async function moderateName(text: string, kind: "username" | "display name"): Promise<{ safe: boolean; reason?: string }> {
   if (!process.env.OPENROUTER_API_KEY) return { safe: true };
@@ -528,6 +541,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const existing = await storage.getUserByUsername(username);
       if (existing) return res.status(409).json({ error: "Username already taken" });
+
+      if (BANNED_USERNAMES.has(username.toLowerCase())) return res.status(400).json({ error: "That username is not allowed on School-y." });
 
       const nameCheck = await moderateName(username, "username");
       if (!nameCheck.safe) return res.status(400).json({ error: "That username is not allowed on School-y." });
