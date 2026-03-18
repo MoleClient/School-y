@@ -813,11 +813,12 @@ function NewConversationModal({ onClose, onCreated }: {
 
 // ─── ConversationThread ───────────────────────────────────────────────────────
 
-function ConversationThread({ conv, currentUser, onBack, readOnly }: {
+function ConversationThread({ conv, currentUser, onBack, readOnly, onUpdate }: {
   conv: Conversation & { messages?: Message[] };
   currentUser: UserMeta | null;
   onBack: () => void;
   readOnly?: boolean;
+  onUpdate?: () => void;
 }) {
   const [messages, setMessages] = useState<Message[]>(conv.messages || []);
   const [loading, setLoading] = useState(!conv.messages);
@@ -959,11 +960,12 @@ function ConversationThread({ conv, currentUser, onBack, readOnly }: {
     } catch {}
   };
 
-  const handleAddMember = async (user: UserMeta) => {
+  const handleAddMember = async (u: UserMeta) => {
     try {
-      await apiRequest("POST", `/api/conversations/${conv.id}/members`, { userId: user.id });
+      await apiRequest("POST", `/api/conversations/${conv.id}/members`, { userId: u.id });
       setAddingMember(false);
-      toast({ title: `Added ${user.displayName || user.username}` });
+      toast({ title: `Added ${u.displayName || u.username}` });
+      onUpdate?.();
     } catch { toast({ title: "Failed to add member", variant: "destructive" }); }
   };
 
@@ -1006,12 +1008,22 @@ function ConversationThread({ conv, currentUser, onBack, readOnly }: {
           </div>
         </div>
 
-        {/* Info button */}
+        {/* Info + Add Member buttons */}
         {!isDm && (
-          <button onClick={() => setShowInfo(v => !v)}
-            className={`absolute right-3 top-3 p-1.5 rounded-full transition-colors ${showInfo ? "bg-[#007AFF]/10 text-[#007AFF]" : "hover:bg-[#F2F2F7] text-[#8E8E93]"}`}>
-            <Info className="h-5 w-5" />
-          </button>
+          <div className="absolute right-2 top-3 flex items-center gap-1">
+            {!isEveryoneConv && currentUser && (
+              <button
+                onClick={() => { setAddingMember(v => !v); setShowInfo(true); }}
+                className={`p-1.5 rounded-full transition-colors ${addingMember ? "bg-[#34C759]/10 text-[#34C759]" : "hover:bg-[#F2F2F7] text-[#8E8E93]"}`}
+                title="Add member">
+                <UserPlus className="h-5 w-5" />
+              </button>
+            )}
+            <button onClick={() => setShowInfo(v => !v)}
+              className={`p-1.5 rounded-full transition-colors ${showInfo ? "bg-[#007AFF]/10 text-[#007AFF]" : "hover:bg-[#F2F2F7] text-[#8E8E93]"}`}>
+              <Info className="h-5 w-5" />
+            </button>
+          </div>
         )}
       </div>
 
@@ -1300,6 +1312,7 @@ export default function Messages() {
             currentUser={user}
             onBack={() => setShowSidebar(true)}
             readOnly={!user}
+            onUpdate={fetchConversations}
           />
         ) : (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-4">
