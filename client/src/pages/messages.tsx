@@ -392,7 +392,7 @@ function TypingIndicator({ users }: { users: { username: string; displayName?: s
 // ─── MessageInput ─────────────────────────────────────────────────────────────
 
 function MessageInput({
-  onSend, replyTo, onCancelReply, disabled, timedOut, timedOutUntil, convId,
+  onSend, replyTo, onCancelReply, disabled, timedOut, timedOutUntil, convId, slowMode,
 }: {
   onSend: (text: string, imageUrl?: string | null) => void;
   replyTo: Message | null;
@@ -401,16 +401,29 @@ function MessageInput({
   timedOut?: boolean;
   timedOutUntil?: Date | null;
   convId?: string;
+  slowMode?: number;
 }) {
   const [text, setText] = useState("");
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
   const [focused, setFocused] = useState(false);
+  const [cooldownLeft, setCooldownLeft] = useState(0);
+  const lastSentAt = useRef<number>(0);
   const { toast } = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const lastTypingBroadcast = useRef<number>(0);
+
+  // Slowmode countdown ticker
+  useEffect(() => {
+    if (!slowMode) return;
+    const interval = setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((lastSentAt.current + slowMode - Date.now()) / 1000));
+      setCooldownLeft(remaining);
+    }, 250);
+    return () => clearInterval(interval);
+  }, [slowMode]);
 
   const handleTextChange = (val: string) => {
     setText(val);
@@ -425,9 +438,11 @@ function MessageInput({
 
   const handleSend = () => {
     if (!text.trim() && !imageUrl) return;
+    if (cooldownLeft > 0) return;
     setSending(true);
     setTimeout(() => setSending(false), 300);
     onSend(text.trim(), imageUrl);
+    if (slowMode) { lastSentAt.current = Date.now(); setCooldownLeft(Math.ceil(slowMode / 1000)); }
     setText("");
     setImageUrl(null);
     if (typingTimer.current) clearTimeout(typingTimer.current);
@@ -479,6 +494,7 @@ function MessageInput({
     return m > 0 ? `${m}m ${s}s` : `${s}s`;
   })();
 
+  const inCooldown = cooldownLeft > 0;
   const inputDisabled = !!(disabled || timedOut);
 
   return (
@@ -543,6 +559,7 @@ function MessageInput({
             onBlur={() => setFocused(false)}
             placeholder={
               timedOut ? "You are timed out..." :
+              inCooldown ? `Slow mode — wait ${cooldownLeft}s...` :
               disabled ? "Sign in to message..." :
               "School-y Text"
             }
@@ -555,13 +572,16 @@ function MessageInput({
 
         <button
           onClick={handleSend}
-          disabled={!text.trim() && !imageUrl}
-          className={`p-2 rounded-full flex-shrink-0 transition-all duration-200 ${
-            text.trim() || imageUrl
+          disabled={(!text.trim() && !imageUrl) || inCooldown}
+          className={`relative p-2 rounded-full flex-shrink-0 transition-all duration-200 ${
+            (text.trim() || imageUrl) && !inCooldown
               ? "bg-[#007AFF] text-white scale-100"
               : "bg-[#E5E5EA] text-[#8E8E93] scale-90 opacity-70"
           } ${sending ? "animate-send-pulse" : ""}`}>
-          <Send className="h-4 w-4" />
+          {inCooldown
+            ? <span className="text-[11px] font-bold w-4 h-4 flex items-center justify-center">{cooldownLeft}</span>
+            : <Send className="h-4 w-4" />
+          }
         </button>
       </div>
     </div>
@@ -1090,14 +1110,7 @@ function ConversationThread({ conv, currentUser, onBack, readOnly }: {
       </div>
 
       {/* Input or read-only banner */}
-      {conv.type === "everyone" ? (
-        <div className="border-t border-[#E5E5EA] bg-[#F2F2F7] px-4 py-3 flex items-center gap-2">
-          <Lock className="h-4 w-4 text-[#8E8E93] flex-shrink-0" />
-          <p className="text-[12px] font-semibold text-[#8E8E93] uppercase tracking-wide">
-            Everyone chat is temporarily down. Group chats and DMs still available.
-          </p>
-        </div>
-      ) : readOnly ? (
+      {readOnly ? (
         <div className="border-t border-[#E5E5EA] bg-[#F2F2F7] px-4 py-3 flex items-center gap-3">
           <Lock className="h-4 w-4 text-[#8E8E93] flex-shrink-0" />
           <p className="text-[13px] text-[#8E8E93] flex-1">Sign in to join the conversation</p>
@@ -1117,6 +1130,7 @@ function ConversationThread({ conv, currentUser, onBack, readOnly }: {
           timedOut={isTimedOut}
           timedOutUntil={timedOutUntil}
           convId={conv.id}
+          slowMode={conv.type === "everyone" ? 5000 : undefined}
         />
       )}
     </div>

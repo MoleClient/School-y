@@ -962,6 +962,10 @@ Respond ONLY with valid JSON: {"safe":true} or {"safe":false}. Nothing else.`,
   });
 
   // Post message to conversation
+  // Per-user slowmode tracking for everyone chat (userId -> last send timestamp)
+  const everyoneSlowmodeMap = new Map<string, number>();
+  const EVERYONE_SLOWMODE_MS = 5000;
+
   app.post("/api/conversations/:id/messages", async (req: any, res) => {
     const user = await getSessionUser(req);
     if (!user) return res.status(401).json({ error: "Not logged in" });
@@ -974,6 +978,19 @@ Respond ONLY with valid JSON: {"safe":true} or {"safe":false}. Nothing else.`,
     try {
       const isMember = await storage.isConversationMember(convId, user.id);
       if (!isMember) return res.status(403).json({ error: "Not a member" });
+
+      // Slowmode enforcement for everyone chat
+      const convInfo2 = await storage.getConversationById(convId);
+      if (convInfo2?.type === "everyone") {
+        const lastSent = everyoneSlowmodeMap.get(user.id) ?? 0;
+        const elapsed = Date.now() - lastSent;
+        if (elapsed < EVERYONE_SLOWMODE_MS) {
+          const retryAfter = Math.ceil((EVERYONE_SLOWMODE_MS - elapsed) / 1000);
+          return res.status(429).json({ error: "slow_mode", retryAfter });
+        }
+        everyoneSlowmodeMap.set(user.id, Date.now());
+      }
+
       const msg = await storage.createConversationMessage({
         conversationId: convId, userId: user.id,
         content: content?.trim() || "", imageUrl: imageUrl || null, replyToId: replyToId || null,
