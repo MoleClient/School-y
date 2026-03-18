@@ -482,6 +482,7 @@ const BANNED_USERNAMES = new Set([
   "bustermoonsdad69",
   "bustermoon",
   "cummingson",
+  "dil",
 ]);
 
 // ── Hardcoded slur blocklist (instant sync check, no AI needed) ───────────────
