@@ -468,6 +468,42 @@ async function getSessionUser(req: any): Promise<{ id: string; username: string;
   }
 }
 
+// ── AI name moderation ────────────────────────────────────────────────────────
+async function moderateName(text: string, kind: "username" | "display name"): Promise<{ safe: boolean; reason?: string }> {
+  if (!process.env.OPENROUTER_API_KEY) return { safe: true };
+  try {
+    const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://school-y.replit.app",
+        "X-Title": "School-y Name Moderator",
+      },
+      body: JSON.stringify({
+        model: "openai/gpt-4o-mini",
+        messages: [{
+          role: "user",
+          content: `You are a content moderator for a school platform. Is this ${kind} appropriate for a school environment?
+${kind}: "${text}"
+Inappropriate: slurs, hate speech, sexual content, references to violence, drugs, nazis/extremism, offensive nicknames, or anything that would embarrass a school.
+Respond ONLY with valid JSON: {"safe":true} or {"safe":false,"reason":"brief reason"}. Nothing else.`,
+        }],
+        max_tokens: 30,
+        temperature: 0,
+      }),
+    });
+    if (!resp.ok) return { safe: true };
+    const data: any = await resp.json();
+    const raw = data.choices?.[0]?.message?.content?.trim();
+    if (!raw) return { safe: true };
+    const result = JSON.parse(raw);
+    return { safe: !!result.safe, reason: result.reason };
+  } catch {
+    return { safe: true };
+  }
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
   // Parse cookies
   app.use((req: any, _res: any, next: any) => {
@@ -492,6 +528,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const existing = await storage.getUserByUsername(username);
       if (existing) return res.status(409).json({ error: "Username already taken" });
+
+      const nameCheck = await moderateName(username, "username");
+      if (!nameCheck.safe) return res.status(400).json({ error: "That username is not allowed on School-y." });
 
       const user = await storage.createUser({ username, password });
       const session = await storage.createSession(user.id);
@@ -621,6 +660,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!user) return res.status(401).json({ error: "Not logged in" });
     const { displayName, avatarUrl, bio, socialTwitter, socialInstagram, socialDiscord } = req.body as any;
     try {
+      if (displayName && displayName.trim()) {
+        const dnCheck = await moderateName(displayName.trim(), "display name");
+        if (!dnCheck.safe) return res.status(400).json({ error: "That display name is not allowed on School-y." });
+      }
       const updated = await storage.updateUserProfile(user.id, { displayName, avatarUrl, bio, socialTwitter, socialInstagram, socialDiscord });
       const { password: _, ...safe } = updated;
       res.json(safe);
