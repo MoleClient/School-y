@@ -753,6 +753,27 @@ Respond ONLY with valid JSON: {"safe":true} or {"safe":false}. Nothing else.`,
     }
   });
 
+  // Public everyone-chat messages (no auth required, for guest real-time refresh)
+  app.get("/api/conversations/everyone-public/messages", async (_req, res) => {
+    try {
+      const conv = await storage.getOrCreateEveryoneConversation();
+      const msgs = await storage.getConversationMessages(conv.id);
+      const allReactions: any[] = [];
+      for (const m of msgs) {
+        const rxns = await storage.getReactionsByMessage(m.id);
+        allReactions.push(...rxns);
+      }
+      const reactionsByMsg: Record<string, any[]> = {};
+      for (const r of allReactions) {
+        if (!reactionsByMsg[r.messageId]) reactionsByMsg[r.messageId] = [];
+        reactionsByMsg[r.messageId].push(r);
+      }
+      res.json(msgs.map(m => ({ ...m, reactions: reactionsByMsg[m.id] || [] })));
+    } catch {
+      res.status(500).json({ error: "Failed" });
+    }
+  });
+
   // List user's conversations
   app.get("/api/conversations", async (req: any, res) => {
     const user = await getSessionUser(req);
@@ -899,8 +920,15 @@ Respond ONLY with valid JSON: {"safe":true} or {"safe":false}. Nothing else.`,
       });
       const fullUser = { id: user.id, username: user.username, displayName: user.displayName, avatarUrl: user.avatarUrl };
       const payload = { ...msg, user: fullUser, reactions: [] };
-      const memberIds = await storage.getConversationMemberIds(convId);
-      broadcastToUsers(memberIds, "message", payload);
+      const [convInfo, memberIds] = await Promise.all([
+        storage.getConversationById(convId),
+        storage.getConversationMemberIds(convId),
+      ]);
+      if (convInfo?.type === "everyone") {
+        broadcastToAll("message", payload);
+      } else {
+        broadcastToUsers(memberIds, "message", payload);
+      }
       res.json(payload);
 
       // Background AI moderation — fire and forget, response already sent
@@ -1006,8 +1034,13 @@ For the cleaned version: keep the same meaning and tone but replace inappropriat
       const updated = await storage.getReactionsByMessage(req.params.id);
       const msg = await storage.getChatMessage(req.params.id);
       if (msg?.conversationId) {
-        const memberIds = await storage.getConversationMemberIds(msg.conversationId);
-        broadcastToUsers(memberIds, "reactions_updated", { messageId: req.params.id, reactions: updated, conversationId: msg.conversationId });
+        const [convInfo2, memberIds2] = await Promise.all([
+          storage.getConversationById(msg.conversationId),
+          storage.getConversationMemberIds(msg.conversationId),
+        ]);
+        const rxPayload = { messageId: req.params.id, reactions: updated, conversationId: msg.conversationId };
+        if (convInfo2?.type === "everyone") broadcastToAll("reactions_updated", rxPayload);
+        else broadcastToUsers(memberIds2, "reactions_updated", rxPayload);
       }
       res.json({ reactions: updated });
     } catch {

@@ -835,13 +835,14 @@ function ConversationThread({ conv, currentUser, onBack, readOnly }: {
   }, []);
 
   useEffect(() => {
-    if (!conv.messages) {
-      setLoading(true);
-      fetch(`/api/conversations/${conv.id}/messages`, { credentials: "include" })
-        .then(r => r.json())
-        .then((data: Message[]) => { setMessages(data); setLoading(false); })
-        .catch(() => setLoading(false));
-    }
+    setLoading(true);
+    const url = readOnly
+      ? "/api/conversations/everyone-public/messages"
+      : `/api/conversations/${conv.id}/messages`;
+    fetch(url, { credentials: "include" })
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then((data: Message[]) => { setMessages(data); setLoading(false); })
+      .catch(() => setLoading(false));
   }, [conv.id]);
 
   useEffect(() => {
@@ -857,10 +858,8 @@ function ConversationThread({ conv, currentUser, onBack, readOnly }: {
     if (typingUsers.size > 0) scrollToBottom();
   }, [typingUsers.size]);
 
-  // SSE for real-time messages
+  // SSE for real-time messages (works for guests too — server handles anon connections)
   useEffect(() => {
-    if (readOnly) return;
-    if (!currentUser) return;
     const es = new EventSource("/api/messages/sse");
     es.addEventListener("message", e => {
       const msg = JSON.parse(e.data) as Message;
@@ -906,7 +905,7 @@ function ConversationThread({ conv, currentUser, onBack, readOnly }: {
       });
     });
     return () => es.close();
-  }, [conv.id, currentUser?.id, readOnly]);
+  }, [conv.id]);
 
   const handleSend = async (content: string, imageUrl?: string | null) => {
     if (!currentUser) return;
