@@ -479,6 +479,7 @@ const BANNED_USERNAMES = new Set([
   "nigger",
   "igoonto67kid",
   "hitler",
+  "bustermoonsdad69",
 ]);
 
 // ── AI name moderation ────────────────────────────────────────────────────────
