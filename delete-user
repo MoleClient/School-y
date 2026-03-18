@@ -1,0 +1,3 @@
+#!/bin/bash
+# Convenience wrapper — run as: ./delete-user <username>
+node "$(dirname "$0")/scripts/delete-user.mjs" "$@"
