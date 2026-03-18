@@ -480,6 +480,7 @@ const BANNED_USERNAMES = new Set([
   "igoonto67kid",
   "hitler",
   "bustermoonsdad69",
+  "bustermoon",
   "cummingson",
 ]);
 
