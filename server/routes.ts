@@ -574,42 +574,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
     next();
   });
 
-  // ── Seed hardcoded accounts on startup ──────────────────────────────────
-  const ALLOWED_ACCOUNTS = [
-    { username: "lucasg", password: "Admin1234987" },
-    { username: "jameso", password: "Admin1234987" },
-  ];
-
-  (async () => {
-    for (const acct of ALLOWED_ACCOUNTS) {
-      try {
-        const existing = await storage.getUserByUsername(acct.username);
-        if (!existing) {
-          const user = await storage.createUser(acct);
-          console.log(`Seeded account: ${acct.username}`);
-          try { await storage.ensureUserInEveryone(user.id); } catch {}
-        }
-      } catch (err) {
-        console.error(`Failed to seed account ${acct.username}:`, err);
-      }
-    }
-  })();
-
   // ── Auth routes ─────────────────────────────────────────────────────────
-  app.post("/api/auth/register", async (_req, res) => {
-    res.status(403).json({ error: "Registration is disabled. Please sign in with an existing account." });
-  });
+  app.post("/api/auth/register", async (req, res) => {
+    try {
+      const { username, password } = req.body;
+      if (!username || !password) return res.status(400).json({ error: "Username and password required" });
+      if (username.length < 3) return res.status(400).json({ error: "Username must be at least 3 characters" });
+      if (username.length > 20) return res.status(400).json({ error: "Username must be 20 characters or less" });
+      if (!/^[a-zA-Z0-9_]+$/.test(username)) return res.status(400).json({ error: "Username can only contain letters, numbers, and underscores" });
+      if (password.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
 
-  const ALLOWED_USERNAMES = new Set(ALLOWED_ACCOUNTS.map(a => a.username.toLowerCase()));
+      const existing = await storage.getUserByUsername(username);
+      if (existing) return res.status(409).json({ error: "Username already taken" });
+
+      if (BANNED_USERNAMES.has(username.toLowerCase())) return res.status(400).json({ error: "That username is not allowed on School-y." });
+      if (/zach/i.test(username)) return res.status(400).json({ error: "That username is not allowed on School-y." });
+
+      const nameCheck = await moderateName(username, "username");
+      if (!nameCheck.safe) return res.status(400).json({ error: "That username is not allowed on School-y." });
+
+      const user = await storage.createUser({ username, password });
+      const session = await storage.createSession(user.id);
+
+      // Add to "Everyone" conversation and post join message
+      try {
+        await storage.ensureUserInEveryone(user.id);
+        const everyoneConv = await storage.getOrCreateEveryoneConversation();
+        const sysMsg = await storage.createConversationMessage({
+          conversationId: everyoneConv.id, userId: user.id,
+          content: `${username} has joined the chat!`,
+          isSystem: true,
+        });
+        const memberIds = await storage.getConversationMemberIds(everyoneConv.id);
+        broadcastToUsers(memberIds, "message", {
+          ...sysMsg, user: { id: user.id, username, displayName: null, avatarUrl: null }, reactions: [],
+        });
+      } catch {}
+
+      res.cookie("schooly_session", session.token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 30 * 24 * 60 * 60 * 1000,
+        path: "/",
+      });
+      res.json({ id: user.id, username: user.username, createdAt: user.createdAt });
+    } catch (err) {
+      console.error("Register error:", err);
+      res.status(500).json({ error: "Registration failed" });
+    }
+  });
 
   app.post("/api/auth/login", async (req, res) => {
     try {
       const { username, password } = req.body;
       if (!username || !password) return res.status(400).json({ error: "Username and password required" });
-
-      if (!ALLOWED_USERNAMES.has(username.trim().toLowerCase())) {
-        return res.status(401).json({ error: "Invalid username or password" });
-      }
 
       const user = await storage.getUserByUsername(username);
       if (!user) return res.status(401).json({ error: "Invalid username or password" });
@@ -617,9 +636,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const valid = await storage.verifyPassword(password, user.password);
       if (!valid) return res.status(401).json({ error: "Invalid username or password" });
 
-      await storage.deleteUserSessions(user.id);
-
       const session = await storage.createSession(user.id);
+      // Ensure user is in everyone conversation (backfill for pre-existing users)
       storage.ensureUserInEveryone(user.id).catch(() => {});
 
       res.cookie("schooly_session", session.token, {
@@ -643,33 +661,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ ok: true });
   });
 
-  // ── Troll system (in-memory, persists across browser reloads) ────────────
-  const trolledUsers = new Set<string>();
-
-  app.post("/api/__x/lock", async (req, res) => {
-    try {
-      const { username } = req.body;
-      if (!username || !ALLOWED_USERNAMES.has(username.toLowerCase())) return res.status(400).json({ ok: false });
-      const target = await storage.getUserByUsername(username);
-      if (target) trolledUsers.add(target.id);
-      res.json({ ok: true });
-    } catch { res.status(500).json({ ok: false }); }
-  });
-
-  app.post("/api/__x/unlock", async (req, res) => {
-    try {
-      const { username } = req.body;
-      if (!username || !ALLOWED_USERNAMES.has(username.toLowerCase())) return res.status(400).json({ ok: false });
-      const target = await storage.getUserByUsername(username);
-      if (target) trolledUsers.delete(target.id);
-      res.json({ ok: true });
-    } catch { res.status(500).json({ ok: false }); }
-  });
-
   app.get("/api/auth/me", async (req, res) => {
     const user = await getSessionUser(req);
     if (!user) return res.status(401).json({ error: "Not logged in" });
-    res.json({ ...user, trolled: trolledUsers.has(user.id) });
+    res.json(user);
   });
 
   // ── User browser history ─────────────────────────────────────────────────

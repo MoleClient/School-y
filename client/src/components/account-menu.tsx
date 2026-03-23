@@ -10,7 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { LogOut, BarChart2, MessageSquare, Lock, Unlock } from "lucide-react";
+import { User, LogOut, BarChart2, MessageSquare } from "lucide-react";
 import { useLocation } from "wouter";
 
 export function AccountMenu() {
@@ -18,12 +18,6 @@ export function AccountMenu() {
   const [showAuth, setShowAuth] = useState(false);
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [, navigate] = useLocation();
-  const [locked, setLocked] = useState(false);
-
-  const TROLL_TARGETS: Record<string, string> = {
-    jameso: "lucasg",
-    lucasg: "jameso",
-  };
 
   if (loading) return null;
 
@@ -46,20 +40,6 @@ export function AccountMenu() {
 
   const displayName = user.displayName || user.username;
   const initials = displayName.slice(0, 2).toUpperCase();
-
-  const trollTarget = user ? TROLL_TARGETS[user.username] : null;
-
-  const handleLock = async () => {
-    if (!trollTarget) return;
-    const endpoint = locked ? "/api/__x/unlock" : "/api/__x/lock";
-    const res = await fetch(endpoint, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: trollTarget }),
-    });
-    if (res.ok) setLocked(!locked);
-  };
 
   return (
     <DropdownMenu>
@@ -109,25 +89,6 @@ export function AccountMenu() {
           <MessageSquare className="w-4 h-4 mr-2" />
           School Messages
         </DropdownMenuItem>
-
-        {trollTarget && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              data-testid="menu-item-lock"
-              onClick={handleLock}
-              className="cursor-pointer"
-              style={{ color: locked ? "#16a34a" : "#dc2626" }}
-            >
-              {locked ? (
-                <><Unlock className="w-4 h-4 mr-2" />Release {trollTarget}</>
-              ) : (
-                <><Lock className="w-4 h-4 mr-2" />Lock In {trollTarget}</>
-              )}
-            </DropdownMenuItem>
-          </>
-        )}
-
         <DropdownMenuSeparator />
         <DropdownMenuItem
           data-testid="menu-item-logout"
