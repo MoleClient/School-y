@@ -3,11 +3,13 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { AuthProvider } from "@/contexts/AuthContext";
+import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import Browser from "@/pages/browser";
 import About from "@/pages/about";
 import ProfilePage from "@/pages/profile";
 import MessagesPage from "@/pages/messages";
+import SignInPage from "@/pages/sign-in";
+import { Loader2 } from "lucide-react";
 
 function Router() {
   return (
@@ -22,13 +24,31 @@ function Router() {
   );
 }
 
+function AuthGate() {
+  const { user, loading, kicked, clearKicked } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-background">
+        <Loader2 className="w-8 h-8 animate-spin text-[#4285F4]" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <SignInPage kicked={kicked} onKickedDismiss={clearKicked} />;
+  }
+
+  return <Router />;
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <AuthProvider>
           <Toaster />
-          <Router />
+          <AuthGate />
         </AuthProvider>
       </TooltipProvider>
     </QueryClientProvider>

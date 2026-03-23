@@ -202,18 +202,8 @@ export function Homepage({ onSearch, onNavigate }: HomepageProps) {
               </button>
             </div>
 
-            {/* Sign-in nudge for non-logged-in users */}
             {!user && (
               <div className="mt-5 text-center text-[12px] text-muted-foreground">
-                <button
-                  onClick={() => { setAuthMode("register"); setShowAuth(true); }}
-                  className="text-[#4285F4] hover:underline"
-                  data-testid="button-join-schooly"
-                >
-                  Join Schooly
-                </button>
-                {" to save your history & chat"}
-                {" · "}
                 <button
                   onClick={() => { setAuthMode("login"); setShowAuth(true); }}
                   className="text-[#4285F4] hover:underline"
@@ -221,6 +211,7 @@ export function Homepage({ onSearch, onNavigate }: HomepageProps) {
                 >
                   Sign in
                 </button>
+                {" to save your history & chat"}
               </div>
             )}
           </div>

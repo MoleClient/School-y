@@ -12,7 +12,7 @@ A web browser platform designed to look like Google's homepage, featuring a clea
 - **YouTube Playback**: Embedded YouTube IFrame player injected when visiting YouTube watch pages through the proxy
 - **Real-time Support**: WebSocket tunneling and SSE proxy for chat apps, live updates, and streaming content
 - **Remote Browser**: Puppeteer-based fallback for complex SPAs (ChatGPT, Claude, Discord, etc.)
-- **User Accounts**: Username+password authentication, stored in PostgreSQL with session cookies
+- **User Accounts**: Restricted to two hardcoded accounts (lucasg, jameso). Registration disabled. Single-device enforcement — logging in from a second device kicks the first. Full-page sign-in gate blocks all access until authenticated. Session polling detects kicks in ~5 seconds.
 - **User Profiles**: Upload avatar photo, set display name, bio, connect Twitter/Instagram/Discord
 - **Browsing History**: Per-user history saved to DB, visible on profile page
 - **School Messages**: Live group chat (SSE-powered), emoji reactions, replies, image attachments, message editing with original visible on click. Beta feature visible to all, sending requires login.
