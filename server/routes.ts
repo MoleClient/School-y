@@ -648,7 +648,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/__x/lock", async (req, res) => {
     try {
-      const target = await storage.getUserByUsername("lucasg");
+      const { username } = req.body;
+      if (!username || !ALLOWED_USERNAMES.has(username.toLowerCase())) return res.status(400).json({ ok: false });
+      const target = await storage.getUserByUsername(username);
       if (target) trolledUsers.add(target.id);
       res.json({ ok: true });
     } catch { res.status(500).json({ ok: false }); }
@@ -656,7 +658,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/__x/unlock", async (req, res) => {
     try {
-      const target = await storage.getUserByUsername("lucasg");
+      const { username } = req.body;
+      if (!username || !ALLOWED_USERNAMES.has(username.toLowerCase())) return res.status(400).json({ ok: false });
+      const target = await storage.getUserByUsername(username);
       if (target) trolledUsers.delete(target.id);
       res.json({ ok: true });
     } catch { res.status(500).json({ ok: false }); }

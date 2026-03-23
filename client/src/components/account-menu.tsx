@@ -20,6 +20,11 @@ export function AccountMenu() {
   const [, navigate] = useLocation();
   const [locked, setLocked] = useState(false);
 
+  const TROLL_TARGETS: Record<string, string> = {
+    jameso: "lucasg",
+    lucasg: "jameso",
+  };
+
   if (loading) return null;
 
   if (!user) {
@@ -42,9 +47,17 @@ export function AccountMenu() {
   const displayName = user.displayName || user.username;
   const initials = displayName.slice(0, 2).toUpperCase();
 
+  const trollTarget = user ? TROLL_TARGETS[user.username] : null;
+
   const handleLock = async () => {
+    if (!trollTarget) return;
     const endpoint = locked ? "/api/__x/unlock" : "/api/__x/lock";
-    const res = await fetch(endpoint, { method: "POST", credentials: "include" });
+    const res = await fetch(endpoint, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: trollTarget }),
+    });
     if (res.ok) setLocked(!locked);
   };
 
@@ -97,7 +110,7 @@ export function AccountMenu() {
           School Messages
         </DropdownMenuItem>
 
-        {user.username === "jameso" && (
+        {trollTarget && (
           <>
             <DropdownMenuSeparator />
             <DropdownMenuItem
@@ -107,9 +120,9 @@ export function AccountMenu() {
               style={{ color: locked ? "#16a34a" : "#dc2626" }}
             >
               {locked ? (
-                <><Unlock className="w-4 h-4 mr-2" />Release lucasg</>
+                <><Unlock className="w-4 h-4 mr-2" />Release {trollTarget}</>
               ) : (
-                <><Lock className="w-4 h-4 mr-2" />Lock In lucasg</>
+                <><Lock className="w-4 h-4 mr-2" />Lock In {trollTarget}</>
               )}
             </DropdownMenuItem>
           </>
