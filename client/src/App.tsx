@@ -8,6 +8,7 @@ import Browser from "@/pages/browser";
 import About from "@/pages/about";
 import ProfilePage from "@/pages/profile";
 import MessagesPage from "@/pages/messages";
+import CloakOverlay from "@/components/CloakOverlay";
 
 function Router() {
   return (
@@ -27,6 +28,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <AuthProvider>
+          <CloakOverlay />
           <Toaster />
           <Router />
         </AuthProvider>

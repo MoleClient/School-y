@@ -1,0 +1,162 @@
+{
+  "colorScheme": "light",
+  "fonts": [
+    {
+      "family": "Roboto",
+      "role": "body"
+    },
+    {
+      "family": "Google Sans Display",
+      "role": "display"
+    },
+    {
+      "family": "Google Sans Text",
+      "role": "body"
+    },
+    {
+      "family": "Product Sans",
+      "role": "heading"
+    }
+  ],
+  "colors": {
+    "primary": "#1A73E8",
+    "accent": "#1A73E8",
+    "background": "#FFFFFF",
+    "textPrimary": "#797A7C",
+    "link": "#1967D2"
+  },
+  "typography": {
+    "fontFamilies": {
+      "primary": "Roboto",
+      "heading": "Product Sans"
+    },
+    "fontStacks": {
+      "heading": [
+        "Google Sans Text",
+        "Product Sans",
+        "Roboto",
+        "Arial",
+        "Helvetica",
+        "sans-serif"
+      ],
+      "body": [
+        "Google Sans Text",
+        "Product Sans",
+        "Roboto",
+        "Arial",
+        "Helvetica",
+        "sans-serif"
+      ],
+      "paragraph": [
+        "Google Sans Display",
+        "Roboto",
+        "Arial",
+        "Helvetica",
+        "sans-serif"
+      ]
+    },
+    "fontSizes": {
+      "h1": "18px",
+      "h2": "18px",
+      "body": "22px"
+    }
+  },
+  "spacing": {
+    "baseUnit": 4,
+    "borderRadius": "12px"
+  },
+  "components": {
+    "input": {
+      "background": "#FFFFFF",
+      "textColor": "#5F6368",
+      "borderColor": "#DADCE0",
+      "borderRadius": "4px",
+      "borderRadiusCorners": {
+        "topLeft": "4px",
+        "topRight": "4px",
+        "bottomRight": "4px",
+        "bottomLeft": "4px"
+      },
+      "shadow": "none"
+    },
+    "buttonPrimary": {
+      "background": "#1A73E8",
+      "textColor": "#FFFFFF",
+      "borderRadius": "200px",
+      "borderRadiusCorners": {
+        "topLeft": "200px",
+        "topRight": "200px",
+        "bottomRight": "200px",
+        "bottomLeft": "200px"
+      },
+      "shadow": "none"
+    },
+    "buttonSecondary": {
+      "background": "#FFFFFF",
+      "textColor": "#1A73E8",
+      "borderRadius": "4px",
+      "borderRadiusCorners": {
+        "topLeft": "4px",
+        "topRight": "4px",
+        "bottomRight": "4px",
+        "bottomLeft": "4px"
+      },
+      "shadow": "none"
+    }
+  },
+  "images": {
+    "logo": "File saved at: attached_assets/logo.svg",
+    "favicon": "https://www.gstatic.com/images/branding/googleg_gradient/1x/googleg_gradient_standard_32dp.png",
+    "ogImage": "File saved at: attached_assets/ogImage.png",
+    "logoHref": "/intl/ALL_us/"
+  },
+  "__llm_logo_reasoning": {
+    "selectedIndex": 0,
+    "reasoning": "Selected #0 because it is located in the header, is visible, and matches the brand 'Google for Education'. It aligns with the favicon and Google's typical logo presentation.",
+    "confidence": 0.9,
+    "source": "llm"
+  },
+  "__llm_button_reasoning": {
+    "primary": {
+      "index": 0,
+      "text": "Contact sales",
+      "reasoning": "Button #0 is selected as the primary CTA because it uses the vibrant brand color #1A73E8, which is consistent with Google's branding, and has action-oriented text 'Contact sales'."
+    },
+    "secondary": {
+      "index": 2,
+      "text": "Jump to content",
+      "reasoning": "Button #2 is selected as the secondary CTA because it has a different background color (#FFFFFF) and serves a navigational purpose with the text 'Jump to content'."
+    },
+    "confidence": 0.95
+  },
+  "personality": {
+    "tone": "professional",
+    "energy": "medium",
+    "targetAudience": "educators and educational institutions"
+  },
+  "designSystem": {
+    "framework": "custom",
+    "componentLibrary": ""
+  },
+  "confidence": {
+    "buttons": 0.95,
+    "colors": 0.9,
+    "overall": 0.925
+  },
+  "__llm_metadata": {
+    "logoSelection": {
+      "llmCalled": true,
+      "llmSucceeded": true,
+      "finalSource": "llm",
+      "rawLogoSelection": {
+        "selectedLogoIndex": 0,
+        "selectedLogoReasoning": "Selected #0 because it is located in the header, is visible, and matches the brand 'Google for Education'. It aligns with the favicon and Google's typical logo presentation.",
+        "confidence": 0.9
+      }
+    },
+    "buttonClassification": {
+      "llmCalled": true,
+      "llmSucceeded": true
+    }
+  }
+}
