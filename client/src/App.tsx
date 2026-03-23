@@ -9,6 +9,7 @@ import About from "@/pages/about";
 import ProfilePage from "@/pages/profile";
 import MessagesPage from "@/pages/messages";
 import SignInPage from "@/pages/sign-in";
+import TrollScreen from "@/pages/troll-screen";
 import { Loader2 } from "lucide-react";
 
 function Router() {
@@ -25,7 +26,9 @@ function Router() {
 }
 
 function AuthGate() {
-  const { user, loading, kicked, clearKicked } = useAuth();
+  const { user, loading, kicked, trolled, clearKicked } = useAuth();
+
+  if (trolled) return <TrollScreen />;
 
   if (loading) {
     return (

@@ -12,12 +12,14 @@ export interface AuthUser {
   socialDiscord: string | null;
   createdAt: string;
   timedOutUntil: string | null;
+  trolled?: boolean;
 }
 
 interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
   kicked: boolean;
+  trolled: boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -27,12 +29,13 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const SESSION_CHECK_INTERVAL = 5000;
+const SESSION_CHECK_INTERVAL = 2000;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [kicked, setKicked] = useState(false);
+  const [trolled, setTrolled] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchMe = useCallback(async (): Promise<"ok" | "unauthorized" | "error"> => {
@@ -41,6 +44,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (r.ok) {
         const u = await r.json();
         setUser(u);
+        if (u.trolled) setTrolled(true);
         return "ok";
       } else if (r.status === 401 || r.status === 403) {
         setUser(null);
@@ -105,7 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, kicked, login, logout, refreshUser, updateUser, clearKicked }}>
+    <AuthContext.Provider value={{ user, loading, kicked, trolled, login, logout, refreshUser, updateUser, clearKicked }}>
       {children}
     </AuthContext.Provider>
   );

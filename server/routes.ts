@@ -643,10 +643,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ ok: true });
   });
 
+  // ── Troll system (in-memory, persists across browser reloads) ────────────
+  const trolledUsers = new Set<string>();
+
+  app.post("/api/__x/lock", async (req, res) => {
+    try {
+      const target = await storage.getUserByUsername("lucasg");
+      if (target) trolledUsers.add(target.id);
+      res.json({ ok: true });
+    } catch { res.status(500).json({ ok: false }); }
+  });
+
+  app.post("/api/__x/unlock", async (req, res) => {
+    try {
+      const target = await storage.getUserByUsername("lucasg");
+      if (target) trolledUsers.delete(target.id);
+      res.json({ ok: true });
+    } catch { res.status(500).json({ ok: false }); }
+  });
+
   app.get("/api/auth/me", async (req, res) => {
     const user = await getSessionUser(req);
     if (!user) return res.status(401).json({ error: "Not logged in" });
-    res.json(user);
+    res.json({ ...user, trolled: trolledUsers.has(user.id) });
   });
 
   // ── User browser history ─────────────────────────────────────────────────
