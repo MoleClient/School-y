@@ -1,93 +1,80 @@
 #!/bin/bash
 
+# Get the real directory of this script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
 echo ""
 echo " =========================================="
-echo "  School-y - Local Setup"
+echo "  School-y - Starting..."
 echo " =========================================="
 echo ""
 
-# Check for Node.js
+# ── Detect Chrome OS ────────────────────────────────────────────────────────
+IS_CHROMEBOOK=false
+if [ -d "/sys/firmware/chromeos" ] || grep -qi "chromeos\|cros" /proc/version 2>/dev/null; then
+    IS_CHROMEBOOK=true
+fi
+
+# ── Check / install Node.js ──────────────────────────────────────────────────
 if ! command -v node &> /dev/null; then
-    echo " [ERROR] Node.js is not installed."
-    echo ""
-    echo " Please install Node.js from: https://nodejs.org"
-    echo " (Choose the LTS version)"
-    echo ""
-    if command -v open &> /dev/null; then
-        open "https://nodejs.org"
-    elif command -v xdg-open &> /dev/null; then
-        xdg-open "https://nodejs.org"
+    echo " Node.js not found. Installing..."
+    if $IS_CHROMEBOOK || command -v apt-get &> /dev/null; then
+        sudo apt-get update -qq && sudo apt-get install -y nodejs npm
+    elif command -v brew &> /dev/null; then
+        brew install node
+    else
+        echo " Please install Node.js from https://nodejs.org and try again."
+        exit 1
     fi
-    exit 1
 fi
 
-NODE_VER=$(node -v)
-echo " Node.js found: $NODE_VER"
+echo " Node.js: $(node -v)"
 
-# Check for .env file
-if [ ! -f ".env" ]; then
-    echo ""
-    echo " =========================================="
-    echo "  Database Setup Required"
-    echo " =========================================="
-    echo ""
-    echo " School-y needs a free PostgreSQL database."
-    echo " Get one free at: https://neon.tech"
-    echo ""
-    echo " Steps:"
-    echo "   1. Go to https://neon.tech and sign up free"
-    echo "   2. Create a new project"
-    echo "   3. Copy the Connection string (starts with postgres://)"
-    echo "   4. Paste it below"
-    echo ""
-    read -p " Paste your database URL here: " DB_URL
-    echo "DATABASE_URL=$DB_URL" > .env
-    echo ""
-    echo " Saved! You won't need to do this again."
-    echo ""
+# ── Install dependencies ─────────────────────────────────────────────────────
+if [ ! -d "$SCRIPT_DIR/node_modules" ]; then
+    echo " Installing packages (first time, may take a minute)..."
+    npm install --silent
 fi
+echo " Packages ready."
 
-# Install dependencies
-echo " Installing dependencies (first time may take a minute)..."
-npm install --silent
-if [ $? -ne 0 ]; then
-    echo " [ERROR] npm install failed. Check your internet connection."
-    exit 1
-fi
-echo " Dependencies ready."
-
-# Push database schema
-echo " Setting up database tables..."
-npx drizzle-kit push --config=drizzle.config.ts > /dev/null 2>&1
-echo " Database ready."
-
-# Start server in background
-echo ""
-echo " Starting School-y server..."
-npm run dev &
+# ── Start server in background ───────────────────────────────────────────────
+echo " Starting server..."
+nohup npm run dev > "$SCRIPT_DIR/server.log" 2>&1 &
 SERVER_PID=$!
 
-# Wait for server
-echo " Waiting for server to start..."
-sleep 4
+# ── Wait for server to respond ───────────────────────────────────────────────
+echo " Waiting for server..."
+for i in $(seq 1 30); do
+    if curl -s "http://localhost:5000/api/auth/me" > /dev/null 2>&1; then
+        break
+    fi
+    sleep 1
+done
 
-# Open browser
+# ── Open browser ─────────────────────────────────────────────────────────────
 echo " Opening browser..."
-if command -v open &> /dev/null; then
+if $IS_CHROMEBOOK; then
+    # On Chromebook, open the system Chrome browser (outside Linux container)
+    if command -v xdg-open &> /dev/null; then
+        xdg-open "http://localhost:5000" 2>/dev/null &
+    elif [ -f "/usr/bin/google-chrome" ]; then
+        /usr/bin/google-chrome "http://localhost:5000" 2>/dev/null &
+    else
+        # Fallback: use Chrome OS garcon helper to open URL in Chrome
+        if [ -f "/usr/bin/garcon-url-handler" ]; then
+            /usr/bin/garcon-url-handler "http://localhost:5000" &
+        fi
+    fi
+elif command -v open &> /dev/null; then
     open "http://localhost:5000"
 elif command -v xdg-open &> /dev/null; then
     xdg-open "http://localhost:5000"
-else
-    echo " Open your browser and go to: http://localhost:5000"
 fi
 
 echo ""
-echo " =========================================="
-echo "  School-y is running at localhost:5000"
-echo " =========================================="
-echo ""
-echo " Keep this window open while using School-y."
-echo " Press Ctrl+C to stop."
+echo " School-y is running at http://localhost:5000"
+echo " Keep this window open. Press Ctrl+C to stop."
 echo ""
 
 wait $SERVER_PID
