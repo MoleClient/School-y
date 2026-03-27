@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>School-y Launcher</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #0f1117;
+      color: #e0e0e0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .card {
+      background: #1a1d27;
+      border: 1px solid #2d3148;
+      border-radius: 16px;
+      padding: 48px;
+      max-width: 520px;
+      width: 90%;
+      text-align: center;
+    }
+    .logo {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+    h1 {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .subtitle {
+      font-size: 14px;
+      color: #8892a4;
+      margin-bottom: 32px;
+    }
+    .status-box {
+      background: #111827;
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 28px;
+      border: 1px solid #1f2937;
+    }
+    .status-dot {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      margin-right: 8px;
+      vertical-align: middle;
+    }
+    .dot-checking { background: #f59e0b; animation: pulse 1s infinite; }
+    .dot-running  { background: #22c55e; }
+    .dot-offline  { background: #ef4444; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    .status-text { font-size: 14px; vertical-align: middle; }
+    .btn {
+      display: inline-block;
+      padding: 12px 32px;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+      border: none;
+      transition: opacity .2s;
+      margin: 6px;
+    }
+    .btn:hover { opacity: .85; }
+    .btn-primary { background: #6366f1; color: white; }
+    .btn-outline { background: transparent; color: #6366f1; border: 1px solid #6366f1; }
+    .steps {
+      text-align: left;
+      margin-top: 28px;
+      padding-top: 24px;
+      border-top: 1px solid #2d3148;
+    }
+    .steps h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: #8892a4; margin-bottom: 14px; }
+    .step {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 12px;
+      align-items: flex-start;
+      font-size: 13px;
+      color: #c9d1d9;
+    }
+    .step-num {
+      background: #2d3148;
+      color: #8b9cf0;
+      border-radius: 50%;
+      width: 22px;
+      height: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 700;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+    .code {
+      display: inline;
+      background: #0d1117;
+      border: 1px solid #2d3148;
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      color: #a5f3fc;
+    }
+    #launch-btn { display: none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">🌐</div>
+    <h1>School-y</h1>
+    <p class="subtitle">Local browser — checking if server is running...</p>
+
+    <div class="status-box">
+      <span class="status-dot dot-checking" id="dot"></span>
+      <span class="status-text" id="status-msg">Checking for server on localhost:5000...</span>
+    </div>
+
+    <div id="launch-btn">
+      <a class="btn btn-primary" href="http://localhost:5000" target="_blank">Open School-y</a>
+    </div>
+
+    <div class="steps">
+      <h3>How to start School-y</h3>
+      <div class="step">
+        <div class="step-num">1</div>
+        <div><strong>Windows:</strong> Double-click <span class="code">start.bat</span> in this folder.</div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div><strong>Mac / Linux:</strong> Run <span class="code">./start.sh</span> in a terminal.</div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div>Once the server is running, click <strong>Open School-y</strong> above — or this page will redirect automatically.</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const DOT = document.getElementById('dot');
+    const MSG = document.getElementById('status-msg');
+    const BTN = document.getElementById('launch-btn');
+
+    async function check() {
+      try {
+        const res = await fetch('http://localhost:5000/api/auth/me', { signal: AbortSignal.timeout(2000) });
+        // Server is up
+        DOT.className = 'status-dot dot-running';
+        MSG.textContent = 'Server is running! Redirecting...';
+        BTN.style.display = 'block';
+        setTimeout(() => { window.location.href = 'http://localhost:5000'; }, 1500);
+      } catch {
+        DOT.className = 'status-dot dot-offline';
+        MSG.textContent = 'Server not running — start it using the steps below, then this page will auto-detect it.';
+        BTN.style.display = 'none';
+        setTimeout(check, 3000);
+      }
+    }
+
+    check();
+  </script>
+</body>
+</html>
