@@ -24,10 +24,7 @@
       width: 90%;
       text-align: center;
     }
-    .logo {
-      font-size: 48px;
-      margin-bottom: 16px;
-    }
+    .logo { font-size: 48px; margin-bottom: 16px; }
     h1 {
       font-size: 28px;
       font-weight: 700;
@@ -37,11 +34,7 @@
       -webkit-text-fill-color: transparent;
       background-clip: text;
     }
-    .subtitle {
-      font-size: 14px;
-      color: #8892a4;
-      margin-bottom: 32px;
-    }
+    .subtitle { font-size: 14px; color: #8892a4; margin-bottom: 32px; }
     .status-box {
       background: #111827;
       border-radius: 10px;
@@ -76,7 +69,6 @@
     }
     .btn:hover { opacity: .85; }
     .btn-primary { background: #6366f1; color: white; }
-    .btn-outline { background: transparent; color: #6366f1; border: 1px solid #6366f1; }
     .steps {
       text-align: left;
       margin-top: 28px;
@@ -116,6 +108,7 @@
       font-size: 12px;
       color: #a5f3fc;
     }
+    .note { font-size: 12px; color: #6b7280; margin-top: 16px; }
     #launch-btn { display: none; }
   </style>
 </head>
@@ -123,11 +116,11 @@
   <div class="card">
     <div class="logo">🌐</div>
     <h1>School-y</h1>
-    <p class="subtitle">Local browser — checking if server is running...</p>
+    <p class="subtitle">Checking if your local server is running...</p>
 
     <div class="status-box">
       <span class="status-dot dot-checking" id="dot"></span>
-      <span class="status-text" id="status-msg">Checking for server on localhost:5000...</span>
+      <span class="status-text" id="status-msg">Looking for server on localhost:5000...</span>
     </div>
 
     <div id="launch-btn">
@@ -137,18 +130,29 @@
     <div class="steps">
       <h3>How to start School-y</h3>
       <div class="step">
-        <div class="step-num">1</div>
-        <div><strong>Windows:</strong> Double-click <span class="code">start.bat</span> in this folder.</div>
+        <div class="step-num">W</div>
+        <div>
+          <strong>Windows:</strong> Double-click <span class="code">School-y.vbs</span>
+          — no window will appear, it runs silently and opens the browser automatically.
+        </div>
       </div>
       <div class="step">
-        <div class="step-num">2</div>
-        <div><strong>Mac / Linux:</strong> Run <span class="code">./start.sh</span> in a terminal.</div>
+        <div class="step-num">M</div>
+        <div>
+          <strong>Mac:</strong> Double-click <span class="code">start.command</span>
+          — a Terminal window will open briefly, then your browser will launch.
+        </div>
       </div>
       <div class="step">
         <div class="step-num">3</div>
-        <div>Once the server is running, click <strong>Open School-y</strong> above — or this page will redirect automatically.</div>
+        <div>
+          Once running, this page redirects automatically — or click <strong>Open School-y</strong> above.
+        </div>
       </div>
     </div>
+
+    <p class="note">First launch installs packages and may take ~30 seconds. After that it's instant.</p>
+    <p class="note" style="margin-top:6px;">Requires <a href="https://nodejs.org" style="color:#6366f1;">Node.js</a> to be installed.</p>
   </div>
 
   <script>
@@ -158,15 +162,14 @@
 
     async function check() {
       try {
-        const res = await fetch('http://localhost:5000/api/auth/me', { signal: AbortSignal.timeout(2000) });
-        // Server is up
+        await fetch('http://localhost:5000/api/auth/me', { signal: AbortSignal.timeout(2000) });
         DOT.className = 'status-dot dot-running';
         MSG.textContent = 'Server is running! Redirecting...';
         BTN.style.display = 'block';
         setTimeout(() => { window.location.href = 'http://localhost:5000'; }, 1500);
       } catch {
         DOT.className = 'status-dot dot-offline';
-        MSG.textContent = 'Server not running — start it using the steps below, then this page will auto-detect it.';
+        MSG.textContent = 'Server not running — start it first (see steps below).';
         BTN.style.display = 'none';
         setTimeout(check, 3000);
       }

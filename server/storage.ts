@@ -358,4 +358,8 @@ class DatabaseStorage {
   }
 }
 
-export const storage = new DatabaseStorage();
+import { MemStorage } from "./mem-storage";
+
+export const storage = process.env.DATABASE_URL
+  ? new DatabaseStorage()
+  : new MemStorage();
