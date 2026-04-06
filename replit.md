@@ -78,6 +78,45 @@ The proxy endpoint includes several security measures:
 - Protocol validation (HTTP/HTTPS only)
 - Request timeout (10 seconds)
 
+## Distribution / Offline Access
+
+Several methods are provided so users can run School-y without a terminal:
+
+- **`School-y.vbs`** — Silent Windows launcher (double-click, no terminal window)
+- **`start.command`** — macOS launcher (double-click in Finder)
+- **`start.sh`** — Linux / Chromebook Linux launcher
+- **`setup-chromebook.sh`** — Chromebook one-time setup script
+- **`open.html`** — Browser launcher with auto-redirect (open in any browser)
+
+### Chrome Extension (`extension/` folder)
+A self-contained Chrome Extension that works on **Chromebook without any terminal or Node.js**:
+
+**Files:**
+- `manifest.json` — MV3 manifest, requires storage + tabs + host_permissions
+- `background.js` — Opens School-y tab when extension icon clicked
+- `index.html` + `style.css` + `app.js` — Dark-themed browser UI with home page, quick links, and URL bar
+- `sw.js` — Ultraviolet service worker registered from the extension page
+- `uv/` — Ultraviolet proxy bundle (handler, client, sw, config)
+- `baremux/` — BareMux ES module + shared worker
+- `epoxy/` — Epoxy transport ES module (Wisp TCP tunneling)
+
+**How it works:**
+1. User loads `extension/` folder as "unpacked" in `chrome://extensions`
+2. On first open, setup screen prompts for a Wisp server URL (e.g. `wss://your-app.replit.app/wisp/`)
+3. BareMux initializes Epoxy transport connecting to the Wisp WebSocket
+4. UV service worker intercepts requests with prefix `/uv/service/` and proxies them through Wisp
+5. The embedded `<iframe>` renders proxied sites fully
+
+**Installation:**
+1. Open `chrome://extensions` → Enable Developer Mode
+2. Click "Load unpacked" → select the `extension/` folder
+3. Click the School-y icon → enter server URL → browse freely
+
+## Google Classroom Cloaking
+- Tab title and favicon are set to "Google Classroom" by default (`client/index.html`)
+- `CloakOverlay.tsx` shows a fake Classroom dashboard automatically when the window loses focus
+- Toggle with **Alt+C**, dismiss with **Escape**
+
 ## Development
 
 ```bash

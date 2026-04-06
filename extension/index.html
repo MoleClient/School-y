@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>School-y</title>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+
+<!-- Setup screen (shown when no Wisp server configured) -->
+<div id="setup-screen" class="screen hidden">
+  <div class="setup-card">
+    <div class="setup-logo">🌐</div>
+    <h1>School-y Setup</h1>
+    <p>School-y needs a proxy server URL to browse the web. Enter the URL of your School-y server below.</p>
+    <div class="setup-field">
+      <label>Server URL (wss:// or ws://)</label>
+      <input id="wisp-input" type="text" placeholder="wss://your-server.replit.app/wisp/" spellcheck="false"/>
+    </div>
+    <p class="setup-hint">This is the URL of your deployed School-y app with <code>/wisp/</code> at the end.</p>
+    <button id="save-setup" class="btn-primary">Save &amp; Continue</button>
+    <button id="try-local" class="btn-secondary">Try Local Server (localhost)</button>
+  </div>
+</div>
+
+<!-- Main browser -->
+<div id="browser-screen" class="screen hidden">
+  <div class="toolbar">
+    <button id="btn-back" class="nav-btn" title="Back">&#8592;</button>
+    <button id="btn-forward" class="nav-btn" title="Forward">&#8594;</button>
+    <button id="btn-reload" class="nav-btn" title="Reload">&#8635;</button>
+    <button id="btn-home" class="nav-btn" title="Home">&#8962;</button>
+    <div class="url-bar-wrap">
+      <span class="lock-icon" id="lock-icon">🔒</span>
+      <input id="url-bar" type="text" placeholder="Search or enter a URL..." spellcheck="false" autocomplete="off"/>
+    </div>
+    <button id="btn-settings" class="nav-btn" title="Settings">⚙</button>
+  </div>
+  <div class="browser-body">
+    <iframe id="browser-frame" sandbox="allow-forms allow-modals allow-orientation-lock allow-pointer-lock allow-popups allow-presentation allow-same-origin allow-scripts" allow="fullscreen"></iframe>
+    <div id="home-page" class="home-page">
+      <div class="home-logo">🌐</div>
+      <h1 class="home-title">School-y</h1>
+      <form id="search-form" class="search-wrap">
+        <input id="search-input" type="text" placeholder="Search the web or enter a URL..." autocomplete="off" spellcheck="false"/>
+        <button type="submit" class="search-btn">Go</button>
+      </form>
+      <div class="quick-links">
+        <a href="#" class="quick-link" data-url="https://www.youtube.com">YouTube</a>
+        <a href="#" class="quick-link" data-url="https://www.reddit.com">Reddit</a>
+        <a href="#" class="quick-link" data-url="https://www.wikipedia.org">Wikipedia</a>
+        <a href="#" class="quick-link" data-url="https://www.github.com">GitHub</a>
+        <a href="#" class="quick-link" data-url="https://www.twitch.tv">Twitch</a>
+        <a href="#" class="quick-link" data-url="https://www.roblox.com">Roblox</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="app.js" defer></script>
+</body>
+</html>

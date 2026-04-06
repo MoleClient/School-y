@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "School-y",
+  "version": "1.0.0",
+  "description": "Browse freely — proxy browser that works anywhere",
+  "permissions": ["storage", "tabs", "unlimitedStorage"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_title": "Open School-y",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "classic"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["*", "uv/*"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
