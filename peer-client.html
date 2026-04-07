@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>School-y</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',Arial,sans-serif;background:#0f1117;color:#e0e0e0;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+
+/* ── Setup screen ──────────────────────────────────── */
+#setup{flex:1;display:flex;align-items:center;justify-content:center;padding:20px}
+.card{background:#1a1d27;border:1px solid #2d3148;border-radius:16px;padding:40px;max-width:520px;width:100%}
+h1{font-size:22px;font-weight:700;background:linear-gradient(135deg,#6366f1,#8b5cf6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:6px}
+.sub{font-size:13px;color:#6b7280;margin-bottom:24px}
+.step{background:#111827;border:1px solid #1f2937;border-radius:10px;padding:16px;margin-bottom:12px}
+.step-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#6366f1;margin-bottom:8px;font-weight:600}
+textarea{width:100%;background:#0d1117;border:1px solid #374151;border-radius:8px;color:#a5f3fc;font-family:monospace;font-size:11px;padding:10px;resize:none;outline:none}
+textarea:focus{border-color:#6366f1}
+.btn{padding:10px 20px;border-radius:8px;border:none;font-size:13px;font-weight:600;cursor:pointer;transition:opacity .15s}
+.btn:hover{opacity:.85}
+.btn-primary{background:#6366f1;color:white;margin-top:8px;width:100%}
+.btn-sm{padding:7px 14px;font-size:12px;background:#1f2937;color:#9ca3af;border:1px solid #374151;border-radius:6px;cursor:pointer;margin-top:6px}
+.btn-sm:hover{background:#2d3148}
+.status{font-size:13px;padding:10px 14px;border-radius:8px;margin-bottom:14px}
+.status.waiting{background:#1c1f2e;color:#8892a4;border:1px solid #2d3148}
+.status.connected{background:#052e16;color:#4ade80;border:1px solid #166534}
+.status.error{background:#2d0a0a;color:#f87171;border:1px solid #7f1d1d}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;vertical-align:middle}
+.dot.pulse{background:#f59e0b;animation:pulse 1s infinite}
+.dot.green{background:#4ade80}
+.dot.red{background:#f87171}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* ── Browser UI ────────────────────────────────────── */
+#browser{display:none;flex-direction:column;height:100vh}
+.toolbar{display:flex;align-items:center;gap:4px;padding:5px 8px;background:#1a1d27;border-bottom:1px solid #2d3148;flex-shrink:0}
+.nav-btn{width:32px;height:32px;background:transparent;border:none;border-radius:6px;color:#9ca3af;font-size:15px;cursor:pointer;flex-shrink:0;transition:background .15s}
+.nav-btn:hover{background:#2d3148;color:#e0e0e0}
+.url-wrap{flex:1;display:flex;align-items:center;background:#111827;border:1px solid #374151;border-radius:20px;padding:0 12px;gap:6px;transition:border-color .15s}
+.url-wrap:focus-within{border-color:#6366f1}
+#url-bar{flex:1;background:transparent;border:none;outline:none;color:#e0e0e0;font-size:13px;padding:6px 0}
+#url-bar::placeholder{color:#4b5563}
+.status-pill{font-size:11px;padding:3px 10px;border-radius:20px;margin-left:4px;flex-shrink:0}
+.status-pill.on{background:#052e16;color:#4ade80;border:1px solid #166534}
+.status-pill.off{background:#2d0a0a;color:#f87171;border:1px solid #7f1d1d}
+
+/* ── Content area ──────────────────────────────────── */
+.browser-body{flex:1;position:relative;overflow:hidden}
+#content-frame{width:100%;height:100%;border:none;display:none;background:white}
+#content-frame.show{display:block}
+#home{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0f1117;padding:20px}
+.home-logo{font-size:48px;margin-bottom:10px}
+.home-title{font-size:28px;font-weight:700;background:linear-gradient(135deg,#6366f1,#8b5cf6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:6px}
+.home-sub{font-size:13px;color:#6b7280;margin-bottom:24px}
+.search-wrap{display:flex;gap:8px;width:100%;max-width:520px;margin-bottom:24px}
+#search-in{flex:1;padding:12px 18px;background:#1a1d27;border:1px solid #374151;border-radius:22px;color:#e0e0e0;font-size:14px;outline:none;transition:border-color .15s}
+#search-in:focus{border-color:#6366f1}
+.go-btn{padding:12px 22px;background:#6366f1;color:white;border:none;border-radius:22px;font-size:14px;font-weight:600;cursor:pointer;transition:opacity .15s}
+.go-btn:hover{opacity:.85}
+.quick{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-width:520px}
+.ql{padding:7px 16px;background:#1a1d27;border:1px solid #2d3148;border-radius:18px;color:#9ca3af;text-decoration:none;font-size:12px;cursor:pointer;transition:background .15s}
+.ql:hover{background:#2d3148;color:#e0e0e0}
+#loading{position:absolute;inset:0;background:#0f1117;display:none;align-items:center;justify-content:center;flex-direction:column;gap:12px}
+#loading.show{display:flex}
+.spinner{width:32px;height:32px;border:3px solid #2d3148;border-top-color:#6366f1;border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+
+<!-- ── SETUP ────────────────────────────────────────── -->
+<div id="setup">
+<div class="card">
+  <h1>&#127760; School-y</h1>
+  <p class="sub">Connect to your home computer to browse freely.</p>
+
+  <div id="status-setup" class="status waiting"><span class="dot pulse"></span>Ready to connect</div>
+
+  <div class="step">
+    <div class="step-label">Step 1 — Paste the code from peer-host.html (running at home)</div>
+    <textarea id="offer-in" rows="5" placeholder="Paste the code from your home computer here..."></textarea>
+    <button class="btn btn-primary" onclick="startWithOffer()">Generate My Code</button>
+  </div>
+
+  <div class="step hidden" id="step2">
+    <div class="step-label">Step 2 — Copy this and send it back to your home computer</div>
+    <textarea id="answer-out" rows="5" readonly></textarea>
+    <button class="btn-sm" onclick="copyAnswer()">Copy</button>
+    <span id="copy-ok" style="font-size:12px;color:#4ade80;margin-left:10px;opacity:0;transition:opacity .3s">Copied!</span>
+    <p style="font-size:12px;color:#6b7280;margin-top:8px">Then paste it into the home computer and click Connect. This page will switch to the browser automatically.</p>
+  </div>
+</div>
+</div>
+
+<!-- ── BROWSER ──────────────────────────────────────── -->
+<div id="browser">
+  <div class="toolbar">
+    <button class="nav-btn" onclick="goBack()" title="Back">&#8592;</button>
+    <button class="nav-btn" onclick="goForward()" title="Forward">&#8594;</button>
+    <button class="nav-btn" onclick="reload()" title="Reload">&#8635;</button>
+    <button class="nav-btn" onclick="goHome()" title="Home">&#8962;</button>
+    <div class="url-wrap">
+      <span style="font-size:11px;flex-shrink:0">&#128274;</span>
+      <input id="url-bar" type="text" placeholder="Search or enter a URL..." spellcheck="false" autocomplete="off"/>
+    </div>
+    <span id="conn-pill" class="status-pill off">Offline</span>
+  </div>
+  <div class="browser-body">
+    <div id="home">
+      <div class="home-logo">&#127760;</div>
+      <div class="home-title">School-y</div>
+      <p class="home-sub">Connected. Browse anything.</p>
+      <form class="search-wrap" onsubmit="handleSearch(event)">
+        <input id="search-in" type="text" placeholder="Search or enter a URL..." autocomplete="off" spellcheck="false"/>
+        <button type="submit" class="go-btn">Go</button>
+      </form>
+      <div class="quick">
+        <span class="ql" onclick="navigate('https://www.youtube.com')">YouTube</span>
+        <span class="ql" onclick="navigate('https://www.reddit.com')">Reddit</span>
+        <span class="ql" onclick="navigate('https://www.wikipedia.org')">Wikipedia</span>
+        <span class="ql" onclick="navigate('https://www.twitch.tv')">Twitch</span>
+        <span class="ql" onclick="navigate('https://www.roblox.com')">Roblox</span>
+        <span class="ql" onclick="navigate('https://www.github.com')">GitHub</span>
+        <span class="ql" onclick="navigate('https://www.twitter.com')">Twitter/X</span>
+        <span class="ql" onclick="navigate('https://www.discord.com')">Discord</span>
+      </div>
+    </div>
+    <div id="loading"><div class="spinner"></div><span style="font-size:13px;color:#6b7280">Loading...</span></div>
+    <iframe id="content-frame" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
+  </div>
+</div>
+
+<script>
+const STUN = {iceServers:[
+  {urls:'stun:stun.l.google.com:19302'},
+  {urls:'stun:stun1.l.google.com:19302'}
+]};
+
+let pc, dc;
+let history = [], histIdx = -1;
+let currentUrl = '';
+let pendingReqs = {};
+let reqId = 0;
+let chunkBuffers = {};
+
+function setStatusSetup(msg, type) {
+  const el = document.getElementById('status-setup');
+  el.className = 'status ' + type;
+  const dot = type === 'connected' ? 'green' : type === 'error' ? 'red' : 'pulse';
+  el.innerHTML = `<span class="dot ${dot}"></span>${msg}`;
+}
+
+async function startWithOffer() {
+  const raw = document.getElementById('offer-in').value.trim();
+  if (!raw) { alert('Paste the code from your home computer first.'); return; }
+
+  setStatusSetup('Processing...', 'waiting');
+  try {
+    const offer = JSON.parse(atob(raw));
+    pc = new RTCPeerConnection(STUN);
+
+    pc.ondatachannel = (e) => {
+      dc = e.channel;
+      setupChannel();
+    };
+
+    pc.onicegatheringstatechange = () => {
+      if (pc.iceGatheringState === 'complete') {
+        document.getElementById('answer-out').value = btoa(JSON.stringify(pc.localDescription));
+        document.getElementById('step2').classList.remove('hidden');
+        setStatusSetup('Copy your code above and send it to your home computer.', 'waiting');
+      }
+    };
+
+    await pc.setRemoteDescription(offer);
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+
+    setStatusSetup('Gathering info... wait for Step 2 to appear below.', 'waiting');
+  } catch(e) {
+    setStatusSetup('Error: ' + e.message + ' — Try copying the code again.', 'error');
+  }
+}
+
+function copyAnswer() {
+  const t = document.getElementById('answer-out');
+  t.select();
+  document.execCommand('copy');
+  const c = document.getElementById('copy-ok');
+  c.style.opacity = 1;
+  setTimeout(() => c.style.opacity = 0, 1500);
+}
+
+function setupChannel() {
+  dc.onopen = () => {
+    document.getElementById('setup').style.display = 'none';
+    document.getElementById('browser').style.display = 'flex';
+    document.getElementById('conn-pill').className = 'status-pill on';
+    document.getElementById('conn-pill').textContent = 'Connected';
+  };
+  dc.onclose = () => {
+    document.getElementById('conn-pill').className = 'status-pill off';
+    document.getElementById('conn-pill').textContent = 'Disconnected';
+  };
+  dc.onmessage = (e) => handleMessage(e.data);
+}
+
+function handleMessage(raw) {
+  let msg;
+  try { msg = JSON.parse(raw); } catch { return; }
+
+  // Chunked message reassembly
+  if (msg.__chunk) {
+    if (!chunkBuffers[msg.id]) chunkBuffers[msg.id] = { parts: [], total: msg.total };
+    chunkBuffers[msg.id].parts[msg.index] = msg.data;
+    const buf = chunkBuffers[msg.id];
+    if (buf.parts.filter(Boolean).length === buf.total) {
+      const full = buf.parts.join('');
+      delete chunkBuffers[msg.id];
+      handleMessage(full);
+    }
+    return;
+  }
+
+  const resolve = pendingReqs[msg.id];
+  if (resolve) {
+    delete pendingReqs[msg.id];
+    resolve(msg);
+  }
+}
+
+function proxyFetch(url) {
+  return new Promise((resolve) => {
+    const id = ++reqId;
+    pendingReqs[id] = resolve;
+    dc.send(JSON.stringify({ id, url }));
+  });
+}
+
+async function navigate(url) {
+  if (!url) return;
+  if (!/^https?:\/\//i.test(url)) {
+    if (/^[a-z0-9]+([\-\.][a-z0-9]+)*\.[a-z]{2,}(\/.*)?$/i.test(url) && !url.includes(' ')) {
+      url = 'https://' + url;
+    } else {
+      url = 'https://duckduckgo.com/?q=' + encodeURIComponent(url);
+    }
+  }
+
+  currentUrl = url;
+  document.getElementById('url-bar').value = url;
+  document.getElementById('home').style.display = 'none';
+  document.getElementById('loading').classList.add('show');
+  document.getElementById('content-frame').classList.remove('show');
+
+  if (histIdx < history.length - 1) history = history.slice(0, histIdx + 1);
+  history.push(url);
+  histIdx = history.length - 1;
+
+  const res = await proxyFetch(url);
+  document.getElementById('loading').classList.remove('show');
+
+  if (!res.ok) {
+    document.getElementById('content-frame').classList.add('show');
+    document.getElementById('content-frame').srcdoc =
+      `<html><body style="font-family:sans-serif;padding:20px;background:#fff"><h2>Error</h2><p>${res.error || 'Unknown error'}</p></body></html>`;
+    return;
+  }
+
+  // Handle proxied anchor clicks
+  let html = res.body || '';
+  if (!res.binary) {
+    html = html.replace(/href="__PROXY__([^"]+)"/gi, (m, enc) => {
+      const target = decodeURIComponent(enc);
+      return `href="#" onclick="parent.navigateTo('${target.replace(/'/g,"\\'")}')"`;
+    });
+  }
+
+  document.getElementById('content-frame').classList.add('show');
+
+  if (res.binary) {
+    const blob = new Blob([Uint8Array.from(atob(res.body), c => c.charCodeAt(0))], {type: res.contentType});
+    document.getElementById('content-frame').src = URL.createObjectURL(blob);
+  } else {
+    document.getElementById('content-frame').srcdoc = html;
+  }
+
+  document.getElementById('url-bar').value = res.url || url;
+}
+
+window.navigateTo = navigate;
+
+function handleSearch(e) {
+  e.preventDefault();
+  const v = document.getElementById('search-in').value.trim();
+  if (v) navigate(v);
+}
+
+document.getElementById('url-bar').addEventListener('keydown', e => {
+  if (e.key === 'Enter') navigate(e.target.value);
+});
+
+function goBack()    { if (histIdx > 0) navigate(history[--histIdx]); }
+function goForward() { if (histIdx < history.length - 1) navigate(history[++histIdx]); }
+function reload()    { if (currentUrl) navigate(currentUrl); }
+function goHome()    {
+  document.getElementById('home').style.display = 'flex';
+  document.getElementById('content-frame').classList.remove('show');
+  document.getElementById('content-frame').srcdoc = '';
+  document.getElementById('url-bar').value = '';
+  currentUrl = '';
+}
+</script>
+</body>
+</html>

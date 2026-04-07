@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>School-y Host</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',Arial,sans-serif;background:#0f1117;color:#e0e0e0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.card{background:#1a1d27;border:1px solid #2d3148;border-radius:16px;padding:40px;max-width:560px;width:100%}
+h1{font-size:22px;font-weight:700;background:linear-gradient(135deg,#6366f1,#8b5cf6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:6px}
+.sub{font-size:13px;color:#6b7280;margin-bottom:28px}
+.step{background:#111827;border:1px solid #1f2937;border-radius:10px;padding:18px;margin-bottom:14px}
+.step-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#6366f1;margin-bottom:8px;font-weight:600}
+textarea{width:100%;background:#0d1117;border:1px solid #374151;border-radius:8px;color:#a5f3fc;font-family:monospace;font-size:11px;padding:10px;resize:none;outline:none}
+textarea:focus{border-color:#6366f1}
+.btn{padding:10px 20px;border-radius:8px;border:none;font-size:13px;font-weight:600;cursor:pointer;transition:opacity .15s;margin-top:8px}
+.btn:hover{opacity:.85}
+.btn-primary{background:#6366f1;color:white}
+.btn-sm{padding:7px 14px;font-size:12px;background:#1f2937;color:#9ca3af;border:1px solid #374151;border-radius:6px;cursor:pointer}
+.btn-sm:hover{background:#2d3148}
+.status{font-size:13px;padding:10px 14px;border-radius:8px;margin-bottom:14px}
+.status.waiting{background:#1c1f2e;color:#8892a4;border:1px solid #2d3148}
+.status.connected{background:#052e16;color:#4ade80;border:1px solid #166534}
+.status.error{background:#2d0a0a;color:#f87171;border:1px solid #7f1d1d}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;vertical-align:middle}
+.dot.pulse{background:#f59e0b;animation:pulse 1s infinite}
+.dot.green{background:#4ade80}
+.dot.red{background:#f87171}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.log{background:#0d1117;border:1px solid #1f2937;border-radius:8px;padding:12px;font-size:11px;font-family:monospace;color:#6b7280;max-height:120px;overflow-y:auto;margin-top:12px}
+.log-line{margin-bottom:3px}
+.log-line.ok{color:#4ade80}
+.log-line.info{color:#60a5fa}
+.log-line.err{color:#f87171}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>School-y Host</h1>
+  <p class="sub">Run this at home. It lets your Chromebook browse through your connection.</p>
+
+  <div id="status" class="status waiting"><span class="dot pulse"></span>Setting up connection...</div>
+
+  <!-- Step 1: Share offer -->
+  <div class="step" id="step1">
+    <div class="step-label">Step 1 — Copy this code and send it to your Chromebook</div>
+    <textarea id="offer-out" rows="5" readonly placeholder="Generating connection code..."></textarea>
+    <button class="btn-sm" onclick="copyOffer()">Copy</button>
+    <span id="copy-confirm" style="font-size:12px;color:#4ade80;margin-left:10px;opacity:0;transition:opacity .3s">Copied!</span>
+  </div>
+
+  <!-- Step 2: Paste answer -->
+  <div class="step" id="step2">
+    <div class="step-label">Step 2 — Paste the code your Chromebook gives you back</div>
+    <textarea id="answer-in" rows="5" placeholder="Paste answer code here..."></textarea>
+    <button class="btn btn-primary" onclick="connectWithAnswer()">Connect</button>
+  </div>
+
+  <!-- Activity log -->
+  <div class="log" id="log"><div class="log-line info">Starting up...</div></div>
+</div>
+
+<script>
+const STUN = {iceServers:[
+  {urls:'stun:stun.l.google.com:19302'},
+  {urls:'stun:stun1.l.google.com:19302'}
+]};
+
+let pc, dc;
+
+function log(msg, type='info'){
+  const el = document.getElementById('log');
+  const d = document.createElement('div');
+  d.className = 'log-line ' + type;
+  d.textContent = new Date().toLocaleTimeString() + ' — ' + msg;
+  el.appendChild(d);
+  el.scrollTop = el.scrollHeight;
+}
+
+function setStatus(msg, type){
+  const el = document.getElementById('status');
+  el.className = 'status ' + type;
+  const dot = type === 'connected' ? 'green' : type === 'error' ? 'red' : 'pulse';
+  el.innerHTML = `<span class="dot ${dot}"></span>${msg}`;
+}
+
+function copyOffer(){
+  const t = document.getElementById('offer-out');
+  t.select();
+  document.execCommand('copy');
+  const c = document.getElementById('copy-confirm');
+  c.style.opacity = 1;
+  setTimeout(() => c.style.opacity = 0, 1500);
+}
+
+async function start(){
+  pc = new RTCPeerConnection(STUN);
+  dc = pc.createDataChannel('proxy', {ordered:true});
+
+  dc.onopen = () => {
+    setStatus('Connected! Your Chromebook can now browse.', 'connected');
+    log('Data channel open — ready to proxy', 'ok');
+  };
+  dc.onclose = () => {
+    setStatus('Disconnected. Refresh to reconnect.', 'error');
+    log('Connection closed', 'err');
+  };
+
+  dc.onmessage = async (e) => {
+    let req;
+    try { req = JSON.parse(e.data); } catch { return; }
+    log('Fetching: ' + req.url);
+    try {
+      // Try local School-y server first (no CORS, no limits)
+      // then fall back to direct fetch for basic sites
+      let body, finalUrl, ct, binary = false;
+      const localOk = await tryLocalServer(req.url);
+
+      if (localOk) {
+        ({body, finalUrl, ct, binary} = localOk);
+        log('Via local server — ' + req.url, 'ok');
+      } else {
+        // Direct fetch fallback (works for CORS-permissive sites)
+        const res = await fetch(req.url, {
+          headers: {'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36','Accept':'text/html,application/xhtml+xml,*/*;q=0.8'},
+          redirect: 'follow', mode: 'cors'
+        });
+        finalUrl = res.url;
+        ct = res.headers.get('content-type') || 'text/html';
+        if (ct.includes('text') || ct.includes('html') || ct.includes('json')) {
+          body = await res.text();
+        } else {
+          const buf = await res.arrayBuffer();
+          body = btoa(String.fromCharCode(...new Uint8Array(buf)));
+          binary = true;
+        }
+        log('Via direct fetch — ' + req.url, 'ok');
+      }
+
+      if (!binary && ct && ct.includes('html')) body = rewriteHtml(body, finalUrl);
+      send({id: req.id, url: finalUrl, status: 200, contentType: ct, body, binary, ok: true});
+    } catch (err) {
+      send({id: req.id, ok: false, error: err.message});
+      log('Error: ' + err.message, 'err');
+    }
+  };
+
+  pc.onicecandidate = () => {};
+  pc.onicegatheringstatechange = () => {
+    if (pc.iceGatheringState === 'complete') {
+      document.getElementById('offer-out').value = btoa(JSON.stringify(pc.localDescription));
+      setStatus('Connection code ready. Send it to your Chromebook.', 'waiting');
+      log('Connection code generated', 'ok');
+    }
+  };
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  log('Gathering connection info via Google STUN...');
+}
+
+function send(obj) {
+  const str = JSON.stringify(obj);
+  // Split large messages
+  const CHUNK = 16000;
+  if (str.length <= CHUNK) {
+    dc.send(str);
+  } else {
+    const chunks = Math.ceil(str.length / CHUNK);
+    for (let i = 0; i < chunks; i++) {
+      dc.send(JSON.stringify({
+        __chunk: true,
+        id: obj.id,
+        index: i,
+        total: chunks,
+        data: str.slice(i * CHUNK, (i + 1) * CHUNK)
+      }));
+    }
+  }
+}
+
+// Try fetching through the local School-y server (no CORS, full proxy)
+async function tryLocalServer(url) {
+  try {
+    const res = await fetch('http://localhost:5000/api/proxy-fetch', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({url}),
+      signal: AbortSignal.timeout(8000)
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+function rewriteHtml(html, baseUrl) {
+  // Inject base tag to handle relative URLs
+  const baseTag = `<base href="${baseUrl}">`;
+  if (html.includes('<head>')) {
+    html = html.replace('<head>', '<head>' + baseTag);
+  } else if (html.includes('<Head>')) {
+    html = html.replace('<Head>', '<Head>' + baseTag);
+  } else {
+    html = baseTag + html;
+  }
+  // Rewrite anchor hrefs to go through the proxy
+  html = html.replace(/(<a\s[^>]*href=["'])([^"'#][^"']*)(["'])/gi, (m, pre, url, post) => {
+    try {
+      const abs = new URL(url, baseUrl).href;
+      return pre + '__PROXY__' + encodeURIComponent(abs) + post;
+    } catch { return m; }
+  });
+  return html;
+}
+
+async function connectWithAnswer(){
+  const raw = document.getElementById('answer-in').value.trim();
+  if (!raw) { alert('Paste the answer code from your Chromebook first.'); return; }
+  try {
+    const answer = JSON.parse(atob(raw));
+    await pc.setRemoteDescription(answer);
+    setStatus('Connecting...', 'waiting');
+    log('Answer accepted, waiting for connection...');
+  } catch(e) {
+    alert('Invalid answer code. Make sure you copied it correctly.');
+    log('Bad answer: ' + e.message, 'err');
+  }
+}
+
+start();
+</script>
+</body>
+</html>

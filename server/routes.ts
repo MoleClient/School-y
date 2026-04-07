@@ -4132,6 +4132,46 @@ For the cleaned version: keep the same meaning and tone but replace inappropriat
     }
   });
 
+  // Peer WebRTC bridge: server-side fetch with no CORS restrictions
+  app.post("/api/proxy-fetch", async (req, res) => {
+    try {
+      const { url } = req.body as { url: string };
+      if (!url) return res.status(400).json({ ok: false, error: "Missing url" });
+
+      let parsedUrl: URL;
+      try { parsedUrl = new URL(url); } catch {
+        return res.status(400).json({ ok: false, error: "Invalid URL" });
+      }
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        return res.status(400).json({ ok: false, error: "Invalid protocol" });
+      }
+
+      const fetchRes = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+        },
+        redirect: 'follow',
+      });
+
+      const finalUrl = fetchRes.url;
+      const ct = fetchRes.headers.get('content-type') || 'text/html';
+      const isText = ct.includes('text') || ct.includes('html') || ct.includes('json') || ct.includes('xml') || ct.includes('javascript') || ct.includes('css');
+
+      if (isText) {
+        const body = await fetchRes.text();
+        return res.json({ ok: true, url: finalUrl, contentType: ct, body, binary: false });
+      } else {
+        const buf = await fetchRes.arrayBuffer();
+        const body = Buffer.from(buf).toString('base64');
+        return res.json({ ok: true, url: finalUrl, contentType: ct, body, binary: true });
+      }
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   app.post("/api/history", async (req, res) => {
     try {
       const { url, title } = req.body;
