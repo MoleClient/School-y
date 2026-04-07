@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CommandString</key>
-	<string>bash -c 'DIR=$(find "$HOME" \( -name "School-y" -o -name "School-y-main" \) -type d -maxdepth 5 2>/dev/null | head -1); if [ -z "$DIR" ]; then DIR=$(find "$HOME/Downloads" "$HOME/Desktop" "$HOME/Documents" -name "start.sh" -maxdepth 4 2>/dev/null | head -1 | xargs dirname 2>/dev/null); fi; if [ -n "$DIR" ]; then cd "$DIR" && echo "Found School-y in: $DIR" && bash start.sh; else echo "Could not find the School-y folder."; echo "Please drag the start.sh file onto this window and press Enter."; exec bash; fi'</string>
+	<string>DIR=$(find "$HOME/Downloads" "$HOME/Desktop" "$HOME/Documents" -name "start.sh" -maxdepth 5 2>/dev/null | head -1 | xargs -I{} dirname {}); if [ -n "$DIR" ]; then cd "$DIR"; bash start.sh; else echo "Could not find School-y. Drag the start.sh file here and press Enter."; fi</string>
 	<key>ProfileCurrentVersion</key>
 	<real>2.0600000000000001</real>
 	<key>RunCommandAsShell</key>

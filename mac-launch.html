@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>School-y — Mac Launcher</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;background:#0f1117;color:#e0e0e0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+.card{background:#1a1d27;border:1px solid #2d3148;border-radius:16px;padding:44px;max-width:580px;width:100%}
+h1{font-size:22px;font-weight:700;background:linear-gradient(135deg,#6366f1,#8b5cf6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:6px}
+.sub{font-size:13px;color:#6b7280;margin-bottom:32px}
+.step{display:flex;gap:16px;margin-bottom:24px;align-items:flex-start}
+.num{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0;margin-top:1px}
+.step-body{flex:1}
+.step-title{font-size:15px;font-weight:600;color:#e0e0e0;margin-bottom:6px}
+.step-desc{font-size:13px;color:#9ca3af;line-height:1.6;margin-bottom:10px}
+.cmd-box{background:#0d1117;border:1px solid #374151;border-radius:8px;padding:12px 14px;font-family:'SF Mono','Courier New',monospace;font-size:13px;color:#a5f3fc;display:flex;align-items:center;justify-content:space-between;gap:10px;word-break:break-all}
+.copy-btn{background:#6366f1;color:white;border:none;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;flex-shrink:0;transition:opacity .15s}
+.copy-btn:hover{opacity:.85}
+.copy-btn.done{background:#16a34a}
+.tip{background:#111827;border:1px solid #1f2937;border-radius:8px;padding:14px 16px;font-size:12px;color:#6b7280;margin-top:24px;line-height:1.7}
+.tip strong{color:#9ca3af}
+kbd{background:#1f2937;border:1px solid #374151;border-radius:4px;padding:1px 6px;font-family:monospace;font-size:11px;color:#c9d1d9}
+.divider{border:none;border-top:1px solid #2d3148;margin:28px 0}
+h2{font-size:14px;font-weight:600;color:#9ca3af;margin-bottom:16px;text-transform:uppercase;letter-spacing:.05em}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>&#127760; School-y — Mac Launcher</h1>
+  <p class="sub">HTML files open instantly on Mac with no security warnings. Follow the steps below.</p>
+
+  <div class="step">
+    <div class="num">1</div>
+    <div class="step-body">
+      <div class="step-title">Open Terminal</div>
+      <div class="step-desc">Press <kbd>&#8984; Cmd</kbd> + <kbd>Space</kbd>, type <strong>Terminal</strong>, press <kbd>Enter</kbd>.</div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="num">2</div>
+    <div class="step-body">
+      <div class="step-title">Paste this command and press Enter</div>
+      <div class="step-desc">This finds the School-y folder wherever you put it and starts it up.</div>
+      <div class="cmd-box">
+        <span id="cmd1">cd "$(find ~/Downloads ~/Desktop ~/Documents -name 'start.sh' -maxdepth 5 2>/dev/null | head -1 | xargs -I{} dirname {})" &amp;&amp; bash start.sh</span>
+        <button class="copy-btn" onclick="copy('cmd1',this)">Copy</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="num">3</div>
+    <div class="step-body">
+      <div class="step-title">Wait for "Server running" then browse</div>
+      <div class="step-desc">First launch may take ~30 seconds while packages install. After that it's instant. The browser will open automatically.</div>
+    </div>
+  </div>
+
+  <hr class="divider"/>
+  <h2>Tunnel launcher (for school access)</h2>
+
+  <div class="step">
+    <div class="num">&#10034;</div>
+    <div class="step-body">
+      <div class="step-title">Start School-y + Cloudflare Tunnel</div>
+      <div class="step-desc">Gives you a shareable URL for your Chromebook. Open Terminal and paste:</div>
+      <div class="cmd-box">
+        <span id="cmd2">cd "$(find ~/Downloads ~/Desktop ~/Documents -name 'tunnel-start.sh' -maxdepth 5 2>/dev/null | head -1 | xargs -I{} dirname {})" &amp;&amp; bash tunnel-start.sh</span>
+        <button class="copy-btn" onclick="copy('cmd2',this)">Copy</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="tip">
+    <strong>If the command says "No such file":</strong> School-y might be in a different folder. Find the folder in Finder, then drag the <code style="background:#0d1117;padding:1px 5px;border-radius:3px;color:#a5f3fc">start.sh</code> file directly onto the Terminal window and press Enter instead.
+  </div>
+</div>
+
+<script>
+function copy(id, btn) {
+  // Get raw text without HTML entities
+  const el = document.getElementById(id);
+  const text = el.textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = 'Copied!';
+    btn.className = 'copy-btn done';
+    setTimeout(() => { btn.textContent = 'Copy'; btn.className = 'copy-btn'; }, 2000);
+  }).catch(() => {
+    // Fallback for file:// protocol
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    btn.textContent = 'Copied!';
+    btn.className = 'copy-btn done';
+    setTimeout(() => { btn.textContent = 'Copy'; btn.className = 'copy-btn'; }, 2000);
+  });
+}
+</script>
+</body>
+</html>
