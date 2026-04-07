@@ -1,8 +1,12 @@
 #!/bin/bash
 # Double-click this file in Finder to start School-y + Cloudflare Tunnel
-# Terminal will open and show you the URL to share
+# If double-click doesn't work: drag this file onto Terminal and press Enter
 
-cd "$(dirname "$0")"
+DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$DIR"
+
+# Self-heal: fix permissions on all scripts so double-click works from now on
+chmod +x "$0" start.sh tunnel-start.sh start.command 2>/dev/null
 
 clear
 echo "============================================"
